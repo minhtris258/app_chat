@@ -8,6 +8,7 @@ import UserRouter from "./routes/user.routes.js";
 import AuthRouter from "./routes/auth.routes.js";
 import FriendRouter from "./routes/friend.routes.js";
 import ConversationRouter from "./routes/conversation.routes.js";
+import MessageRouter from "./routes/message.routes.js";
 
 dotenv.config();
 
@@ -29,8 +30,9 @@ app.get("/health/db", (_req, res) => {
 app.get("/", (_req, res) => res.send("API is ready"));
 app.use("/api/auth", AuthRouter);
 app.use("/api/user", UserRouter);
-app.use("/api/friend", FriendRouter);
+app.use("/api/friends", FriendRouter);
 app.use("/api/conversations", ConversationRouter);
+app.use("/api/messages", MessageRouter);
 
 app.use((_req, res) => res.status(404).json({ message: "Endpoint not found" }));
 
