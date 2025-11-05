@@ -7,6 +7,7 @@ import cookieParser from "cookie-parser";
 import UserRouter from "./routes/user.routes.js";
 import AuthRouter from "./routes/auth.routes.js";
 import FriendRouter from "./routes/friend.routes.js";
+import ConversationRouter from "./routes/conversation.routes.js";
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ app.get("/", (_req, res) => res.send("API is ready"));
 app.use("/api/auth", AuthRouter);
 app.use("/api/user", UserRouter);
 app.use("/api/friend", FriendRouter);
+app.use("/api/conversations", ConversationRouter);
 
 app.use((_req, res) => res.status(404).json({ message: "Endpoint not found" }));
 
