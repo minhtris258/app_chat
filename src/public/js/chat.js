@@ -1,0 +1,845 @@
+// public/js/chat.js
+(function () {
+  // ===== DOM =====
+  const convList        = document.getElementById("convList");
+  const messagesEl      = document.getElementById("messages");
+  const messageInput    = document.getElementById("messageInput");
+  const sendBtn         = document.getElementById("sendBtn");
+  const attachBtn       = document.getElementById("attachBtn");
+  const imageInput      = document.getElementById("imageInput");
+  const typingIndicator = document.getElementById("typingIndicator");
+  const peerNameEl      = document.getElementById("peerName");
+  const peerAvatarEl    = document.getElementById("peerAvatar");
+  const peerStatusEl    = document.getElementById("peerStatus");
+  const newGroupBtnEl   = document.getElementById("newGroupBtn"); // nút ở sidebar
+
+  // ===== NHÓM: phần tử modal (nếu có trong EJS) =====
+  const modal            = document.getElementById("groupModal");
+  const userListEl       = document.getElementById("userList");
+  const groupNameInput   = document.getElementById("groupNameInput");
+  const cancelGroupBtn   = document.getElementById("cancelGroupBtn");
+  const confirmGroupBtn  = document.getElementById("confirmGroupBtn");
+
+  // ===== STATE =====
+  let currentConv  = null;
+  let currentPeer  = null;   // { _id, name, online } hoặc null (chỉ áp dụng direct)
+  let io           = null;
+  let ME_ID        = sessionStorage.getItem("ME_ID") || null;
+  let pollTimer    = null;
+  let lastMsgAt    = 0;
+
+  // typing local state
+  let typingSent = false;
+  let typingIdleTimer = null;
+  let typingHideTimer = null;
+
+  // chờ ME_ID sẵn sàng
+  let meReadyResolve;
+  const meReady = new Promise((res) => (meReadyResolve = res));
+
+  // cache user để lấy initial nhanh
+  const USER_CACHE = new Map();
+
+  // ===== SHIMS: toast & API (nếu chưa có) =====
+  function toast(msg) {
+    let t = document.querySelector(".toast");
+    if (!t) {
+      t = document.createElement("div");
+      t.className = "toast";
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 1500);
+  }
+
+  if (!window.API) {
+    window.API = {
+      _token: localStorage.getItem("TOKEN") || null,
+      setToken(t) { this._token = t; if (t) localStorage.setItem("TOKEN", t); else localStorage.removeItem("TOKEN"); },
+      async _req(method, url, body, asUpload = false) {
+        const headers = {};
+        if (!asUpload) headers["Content-Type"] = "application/json";
+        if (this._token) headers["Authorization"] = "Bearer " + this._token;
+        const res = await fetch(url, {
+          method,
+          headers,
+          credentials: "include",
+          body: asUpload ? body : (body ? JSON.stringify(body) : undefined),
+        });
+        if (!res.ok) {
+          let err = "HTTP " + res.status;
+          try { const j = await res.json(); err = j.message || err; } catch {}
+          throw new Error(err);
+        }
+        try { return await res.json(); } catch { return {}; }
+      },
+      get(url)        { return this._req("GET", url); },
+      post(url, body) { return this._req("POST", url, body); },
+      patch(url, body){ return this._req("PATCH", url, body); },
+      delete(url)     { return this._req("DELETE", url); },
+      upload(url, fd) { return this._req("POST", url, fd, true); },
+    };
+  }
+
+  // ===== HELPERS =====
+  const fmtTime = (ts) =>
+    new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const scrollToBottom = () =>
+    requestAnimationFrame(() => { if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight; });
+
+  const ONLY_EMOJI_RE = /^(?:\p{Extended_Pictographic}|\uFE0F|\u200D)+$/u;
+  const isOnlyEmoji = (s) => !!s && ONLY_EMOJI_RE.test(String(s).trim());
+
+  const getSenderId = (m) =>
+    m.senderId || m.sender || m.from || m.userId ||
+    (m.sender && m.sender._id) || (m.user && m.user._id) || null;
+
+  const classForSender = (sender) => (!ME_ID ? "other" : (String(sender) === String(ME_ID) ? "me" : "other"));
+
+  const getInitial = (userOrName) => {
+    const n = typeof userOrName === "string"
+      ? userOrName
+      : (userOrName?.displayName || userOrName?.username || userOrName?.name || userOrName?.fullName || "");
+    return n.trim() ? n.trim().charAt(0).toUpperCase() : "🙂";
+  };
+
+  function repaintMessages() {
+    if (!messagesEl) return;
+    messagesEl.querySelectorAll(".msg").forEach((node) => {
+      const sender = node.dataset.sender || "";
+      node.className = "msg " + classForSender(sender);
+    });
+  }
+
+  function renderMessage(m) {
+    if (!messagesEl) return;
+    const sender  = (getSenderId(m) || "") + "";
+    const created = m.createdAt || m.created_at || Date.now();
+    const mine    = String(sender) === String(ME_ID);
+
+    // ép emoji nếu text-only là emoji
+    let type = m.type;
+    if (!type && typeof m.text === "string" && isOnlyEmoji(m.text)) type = "emoji";
+
+    // Hàng FLEX để canh trái/phải
+    const row = document.createElement("div");
+    row.className = "msg " + (mine ? "me" : "other");
+    row.dataset.sender = sender;
+
+    // Avatar chữ cái cho đối phương
+    if (!mine) {
+      const ava = document.createElement("div");
+      ava.className = "avatar small";
+
+      let initial = "🙂";
+      if (m.sender && typeof m.sender === "object") {
+        initial = getInitial(m.sender);
+        const sid = String(m.sender._id || m.sender.id || sender);
+        if (sid) USER_CACHE.set(sid, m.sender);
+      } else {
+        const cached = USER_CACHE.get(String(sender));
+        if (cached) {
+          initial = getInitial(cached);
+        } else if (sender) {
+          (async () => {
+            try {
+              const u = await fetchUserById(sender);
+              if (u) {
+                USER_CACHE.set(String(sender), u);
+                ava.textContent = getInitial(u);
+              }
+            } catch {}
+          })();
+        }
+      }
+      ava.textContent = initial;
+      row.appendChild(ava);
+    }
+
+    // Bong bóng
+    const bubble = document.createElement("div");
+    bubble.className = "bubble" + (type === "emoji" ? " emoji" : "") + (type === "image" ? " image" : "");
+
+    if (type === "image" || m.type === "image") {
+      const src = m.image || m.url || m.imageUrl || m.contentUrl || "";
+      bubble.innerHTML = `
+        <img class="image" src="${src}" alt="image">
+        <div class="meta">${fmtTime(created)}</div>
+      `;
+    } else if (type === "emoji") {
+      const emoji = m.emoji || m.text || "";
+      bubble.innerHTML = `
+        <div class="emoji-big">${emoji}</div>
+        <div class="meta">${fmtTime(created)}</div>
+      `;
+    } else {
+      bubble.innerHTML = `
+        <div class="text">${m.text || ""}</div>
+        <div class="meta">${fmtTime(created)}</div>
+      `;
+    }
+    row.appendChild(bubble);
+    messagesEl.appendChild(row);
+
+    const t = +new Date(created);
+    if (!Number.isNaN(t)) lastMsgAt = Math.max(lastMsgAt, t);
+    scrollToBottom();
+  }
+
+  function renderDateBadge(label) {
+    if (!messagesEl) return;
+    const b = document.createElement("div");
+    b.className = "date-badge";
+    b.textContent = label;
+    messagesEl.appendChild(b);
+    scrollToBottom();
+  }
+
+  // ===== FETCH USER BY ID (thử nhiều endpoint phổ biến) =====
+  async function fetchUserById(id) {
+    if (!id) return null;
+    const candidates = [
+      `/api/users/${id}`,
+      `/api/user/${id}`,
+      `/api/user/detail/${id}`,
+      `/api/users?id=${id}`, // nếu server trả {items:[...]}
+    ];
+    for (const url of candidates) {
+      try {
+        const r = await API.get(url);
+        const user = r?.user || r?.data?.user || r?.profile || r?.account || r?.data || r;
+        const obj  = Array.isArray(user) ? user[0] : user;
+        if (!obj) continue;
+        obj._id = obj._id || obj.id || obj.userId || obj.uid || id;
+        return obj;
+      } catch {}
+    }
+    return null;
+  }
+
+  // ===== CONVERSATION DISPLAY HELPERS =====
+  const pickName = (user) =>
+    user?.displayName || user?.username || user?.name || user?.fullName || "Không tên";
+
+  const pickAvatar = (userOrName) => getInitial(userOrName);
+
+  const normalizeId = (u) => (typeof u === "object" ? (u._id || u.id || u.userId || u.uid) : u);
+
+  function getPeer(conv, meId) {
+    const members = conv?.members || conv?.participants || [];
+    return members.find((m) => String(normalizeId(m)) !== String(meId));
+  }
+
+  function getConversationTitle(conv, meId) {
+    const type = conv?.type || (Array.isArray(conv?.members) && conv.members.length > 2 ? "group" : "direct");
+    if (type === "group") return conv?.name || conv?.title || conv?.groupName || "Nhóm";
+    const peer = getPeer(conv, meId);
+    if (peer && typeof peer === "object") return pickName(peer);
+    return conv?.peerName || conv?.name || "Không tên";
+  }
+
+  // ===== DATA =====
+  async function loadMe() {
+    let me;
+    try { me = await API.get("/api/user/profile"); } catch {}
+    if (!me) { try { me = await API.get("/api/auth/me"); } catch {} }
+
+    const user = me?.user || me?.data?.user || me?.profile || me?.account || me;
+    const id   = user?._id || user?.id || user?.userId || user?.uid || null;
+    const name = user?.username || user?.name || user?.displayName || "Bạn";
+
+    ME_ID = id ? String(id) : null;
+    if (ME_ID) sessionStorage.setItem("ME_ID", ME_ID);
+
+    const meNameEl = document.getElementById("meName");
+    if (meNameEl) meNameEl.textContent = name;
+
+    meReadyResolve && meReadyResolve();
+  }
+
+  async function loadConversations() {
+    if (!convList) return;
+    convList.innerHTML = "";
+    const data = await API.get("/api/conversations");
+    const list = data?.items || data?.conversations || data || [];
+
+    list.forEach((c) => {
+      const convId  = c._id || c.id;
+      const peerRaw = getPeer(c, ME_ID);
+      if (peerRaw && typeof peerRaw === "object") {
+        const pid = String(normalizeId(peerRaw));
+        if (pid) USER_CACHE.set(pid, peerRaw);
+      }
+      const peerId  = normalizeId(peerRaw);
+      const title   = getConversationTitle(c, ME_ID);
+
+      const li = document.createElement("li");
+      li.dataset.id = convId;
+      if (peerId) li.dataset.user = peerId;
+
+      const avaChar = c.type === "group"
+        ? "👥"
+        : (typeof peerRaw === "object" ? pickAvatar(peerRaw) : (c.peerName?.[0]?.toUpperCase() || "👤"));
+
+      const last    = c.lastMessage?.text || c.last?.text || c.preview?.text || "";
+      const updated = c.updatedAt || c.lastMessage?.createdAt || c.last?.createdAt;
+
+      li.innerHTML = `
+        <div class="avatar">${avaChar}</div>
+        <div class="col">
+          <div class="title">${title}</div>
+          <div class="last">${last}</div>
+        </div>
+        <div class="time">${updated ? fmtTime(updated) : ""}</div>
+        <div class="status">⚫</div>
+      `;
+      li.addEventListener("click", () => openConversation(convId, c));
+      convList.appendChild(li);
+
+      // nếu chưa có tên (peer là ID) -> fetch user rồi cập nhật
+      if (title === "Không tên" && peerId) {
+        (async () => {
+          const u = await fetchUserById(peerId);
+          if (!u) return;
+          const row = convList.querySelector(`li[data-id="${convId}"]`);
+          if (!row) return;
+          row.querySelector(".title").textContent  = pickName(u);
+          row.querySelector(".avatar").textContent = pickAvatar(u);
+          row.dataset.user = u._id || peerId;
+        })();
+      }
+    });
+  }
+
+  // ===== SOCKET =====
+  function ensureSocket() {
+    if (io) return;
+
+    const token = localStorage.getItem("TOKEN");
+    io = window.io({ withCredentials: true, auth: token ? { token } : undefined });
+
+    io.on("connect", () => {
+      console.log("socket connected");
+      refreshPeerOnline();
+    });
+
+    const onIncoming = (m) => {
+      const convId = (m.conversationId || m.conversation || m.convId || m.roomId) + "";
+      if (String(convId) === String(currentConv)) renderMessage({ ...m });
+    };
+    io.on("message:new", onIncoming);
+    io.on("message:created", onIncoming);
+    io.on("chat:message", onIncoming);
+    io.on("message", onIncoming);
+
+    io.on("typing", ({ conversationId, userId, isTyping }) => {
+      if (String(conversationId) !== String(currentConv)) return;
+      if (ME_ID && String(userId) === String(ME_ID)) return;
+      if (isTyping) {
+        typingIndicator?.classList.remove("hidden");
+        clearTimeout(typingHideTimer);
+        typingHideTimer = setTimeout(() => typingIndicator?.classList.add("hidden"), 3000);
+      } else {
+        typingIndicator?.classList.add("hidden");
+      }
+    });
+
+    io.on("conversation:created", () => loadConversations());
+
+    // online / offline
+    io.on("user:status", ({ userId, online }) => {
+      if (currentPeer && String(currentPeer._id || currentPeer.id) === String(userId)) {
+        currentPeer.online = !!online;
+        peerStatusEl.textContent = online ? "Đang hoạt động" : "Ngoại tuyến";
+      }
+      const dot = document.querySelector(`.conv-list li[data-user="${userId}"] .status`);
+      if (dot) dot.textContent = online ? "🟢" : "⚫";
+    });
+  }
+
+  // ===== POLLING (fallback) =====
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(async () => {
+      if (!currentConv) return;
+      try {
+        const q = new URLSearchParams({ conversationId: currentConv, limit: 20 }).toString();
+        let list = await API.get("/api/messages?" + q);
+        if (!Array.isArray(list)) list = list?.items || list?.messages || [];
+        list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        const fresh = list.filter((m) => {
+          const t = +new Date(m.createdAt || Date.now());
+          return !Number.isNaN(t) && t > lastMsgAt;
+        });
+        if (fresh.length) fresh.forEach(renderMessage);
+      } catch {}
+    }, 5000);
+  }
+  function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+
+  // ===== TYPING (client emits) =====
+  function emitTypingStart() {
+    if (!io || !currentConv || typingSent || !ME_ID) return;
+    io.emit("typing:start", { conversationId: currentConv, userId: ME_ID });
+    typingSent = true;
+  }
+  function scheduleTypingStop() {
+    clearTimeout(typingIdleTimer);
+    typingIdleTimer = setTimeout(() => {
+      if (io && currentConv && ME_ID) io.emit("typing:stop", { conversationId: currentConv, userId: ME_ID });
+      typingSent = false;
+    }, 1500);
+  }
+  function forceTypingStop() {
+    clearTimeout(typingIdleTimer);
+    if (io && currentConv && ME_ID) io.emit("typing:stop", { conversationId: currentConv, userId: ME_ID });
+    typingSent = false;
+  }
+
+  // ===== UI ACTIONS =====
+  async function openConversation(id, convMeta) {
+    await meReady;
+    currentConv = id;
+
+    if (convList) {
+      [...convList.children].forEach((li) =>
+        li.classList.toggle("active", li.dataset.id === String(id))
+      );
+    }
+
+    // lấy conv chi tiết nếu cần populate
+    let conv = convMeta;
+    try {
+      if (!convMeta?.members?.[0] || typeof getPeer(convMeta, ME_ID) !== "object") {
+        const detail = await API.get(`/api/conversations/${id}`);
+        if (detail?._id) conv = detail;
+      }
+    } catch {}
+
+    // xác định peer
+    let peer   = getPeer(conv || convMeta || {}, ME_ID);
+    let peerId = normalizeId(peer);
+
+    if (!peer || typeof peer !== "object") {
+      if (peerId) {
+        const u = await fetchUserById(peerId);
+        if (u) peer = u;
+      }
+    }
+
+    // header
+    const isGroup = (conv?.type || convMeta?.type) === "group";
+    if (isGroup) {
+      peerNameEl.textContent   = getConversationTitle(conv || convMeta, ME_ID);
+      peerAvatarEl.textContent = "👥";
+      peerStatusEl.textContent = "—";
+      currentPeer = null;
+    } else {
+      const displayName = pickName(peer) || "Không tên";
+      peerNameEl.textContent   = displayName;
+      peerAvatarEl.textContent = pickAvatar(peer || displayName);
+      peerStatusEl.textContent = peer?.online ? "Đang hoạt động" : "Ngoại tuyến";
+      currentPeer = { _id: normalizeId(peer) || peerId, name: displayName, online: !!peer?.online };
+      refreshPeerOnline();
+    }
+
+    // reset view + typing indicator
+    if (messagesEl) {
+      messagesEl.innerHTML = "";
+      typingIndicator?.classList.add("hidden");
+      lastMsgAt = 0;
+      renderDateBadge("Hôm nay");
+    }
+
+    // load history
+    try {
+      const q = new URLSearchParams({ conversationId: id, limit: 100 }).toString();
+      let hist = await API.get("/api/messages?" + q);
+      if (!Array.isArray(hist)) hist = hist?.items || hist?.messages || [];
+      hist.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      hist.forEach(renderMessage);
+      repaintMessages();
+      scrollToBottom();
+    } catch (err) {
+      console.warn(err);
+      toast("Không tải được lịch sử trò chuyện");
+    }
+
+    ensureSocket();
+    io.emit("conversation:join", { conversationId: id, conversation: id, roomId: id, convId: id });
+    startPolling();
+  }
+
+  async function send() {
+    if (!currentConv) return;
+
+    // 1) ảnh
+    await sendImages();
+
+    // 2) text / emoji
+    const raw = (messageInput.value || "").trim();
+    if (!raw) return;
+
+    const isEmoji = isOnlyEmoji(raw);
+    const baseText  = { type: "text",  text:  raw };
+    const baseEmoji = { type: "emoji", emoji: raw };
+
+    const bodies = (isEmoji
+      ? [{ conversationId: currentConv, ...baseEmoji }, { conversation: currentConv, ...baseEmoji }, { convId: currentConv, ...baseEmoji }, { roomId: currentConv, ...baseEmoji }]
+      : [{ conversationId: currentConv, ...baseText  }, { conversation: currentConv, ...baseText  }, { convId: currentConv, ...baseText  }, { roomId: currentConv, ...baseText  }]
+    );
+
+    let lastErr = null;
+    for (const body of bodies) {
+      try {
+        const msg = await API.post("/api/messages", body);
+        messageInput.value = "";
+        const show = msg && (msg._id || msg.text || msg.emoji)
+          ? msg
+          : {
+              _id: "local-" + Date.now(),
+              conversation: currentConv,
+              sender: ME_ID,
+              ...(isEmoji ? baseEmoji : baseText),
+              createdAt: new Date().toISOString(),
+            };
+        renderMessage(show);
+        if (io) io.emit("message:new", { ...show, conversationId: currentConv });
+        forceTypingStop();
+        return;
+      } catch (e) { lastErr = e; }
+    }
+    toast(lastErr?.message || "Không thể gửi");
+  }
+
+  // === HỎI LẠI TRẠNG THÁI ONLINE BAN ĐẦU ===
+  function refreshPeerOnline() {
+    if (!io || !currentPeer) return;
+    io.emit("user:whoOnline", {}, (resp) => {
+      const list = resp?.users || [];
+      const uid  = String(currentPeer._id || currentPeer.id);
+      const on   = list.some((x) => String(x) === uid);
+
+      peerStatusEl.textContent = on ? "Đang hoạt động" : "Ngoại tuyến";
+      const row = document.querySelector(`.conv-list li[data-user="${uid}"] .status`);
+      if (row) row.textContent = on ? "🟢" : "⚫";
+    });
+  }
+
+  // ===== BINDINGS =====
+  sendBtn?.addEventListener("click", send);
+  messageInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  messageInput?.addEventListener("input", () => {
+    if (!currentConv || !ME_ID) return;
+    if (messageInput.value.length) emitTypingStart();
+    scheduleTypingStop();
+  });
+  messageInput?.addEventListener("focus", () => {
+    if (messageInput.value.length) emitTypingStart();
+  });
+  messageInput?.addEventListener("blur", () => { forceTypingStop(); });
+
+  document.getElementById("logoutBtn")?.addEventListener("click", async () => {
+    try { await API.post("/api/auth/logout"); } catch {}
+    API.setToken(null);
+    location.href = "/login";
+  });
+
+  // ===== BOOT =====
+  (async function boot() {
+    try {
+      await loadMe();
+      repaintMessages();
+      await loadConversations();
+    } catch (err) {
+      console.warn(err);
+      location.href = "/login";
+    }
+  })();
+
+  // ===== EMOJI =====
+  const emojiBtn    = document.getElementById("emojiBtn");
+  const emojiPicker = document.getElementById("emojiPicker");
+
+  function toggleEmoji() {
+    if (!emojiPicker) return;
+    emojiPicker.classList.toggle("hidden");
+    if (!emojiPicker.classList.contains("hidden")) emojiPicker.scrollTop = 0;
+  }
+  emojiBtn?.addEventListener("click", (e) => { e.stopPropagation(); toggleEmoji(); });
+  document.addEventListener("click", (e) => {
+    if (!emojiPicker || emojiPicker.classList.contains("hidden")) return;
+    const within = emojiPicker.contains(e.target) || emojiBtn.contains(e.target);
+    if (!within) emojiPicker.classList.add("hidden");
+  });
+  emojiPicker?.addEventListener("emoji-click", (ev) => {
+    const emoji = ev.detail.unicode;
+    const el = messageInput;
+    const start = el.selectionStart ?? el.value.length;
+    const end   = el.selectionEnd ?? el.value.length;
+    el.value = el.value.slice(0, start) + emoji + el.value.slice(end);
+    const pos = start + emoji.length;
+    el.setSelectionRange(pos, pos);
+    el.focus();
+    emitTypingStart();
+    scheduleTypingStop();
+  });
+
+  // ===== ẢNH: preview + upload =====
+  const previewBar = document.getElementById("previewBar");
+  let pendingFiles = [];
+
+  function refreshPreview() {
+    if (!previewBar) return;
+    previewBar.innerHTML = "";
+    if (!pendingFiles.length) { previewBar.classList.add("hidden"); return; }
+    previewBar.classList.remove("hidden");
+    pendingFiles.forEach((file, idx) => {
+      const url = URL.createObjectURL(file);
+      const item = document.createElement("div");
+      item.className = "preview-item";
+      item.innerHTML = `<img src="${url}" alt=""><button class="rm" title="Xoá" data-i="${idx}">×</button>`;
+      previewBar.appendChild(item);
+    });
+    previewBar.querySelectorAll(".rm").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const i = +btn.dataset.i;
+        pendingFiles.splice(i, 1);
+        refreshPreview();
+      });
+    });
+  }
+
+  function enqueueFiles(files) {
+    const list = Array.from(files).filter((f) => f && f.type?.startsWith("image/"));
+    if (!list.length) return;
+    pendingFiles.push(...list);
+    refreshPreview();
+  }
+
+  attachBtn?.addEventListener("click", () => imageInput?.click());
+  imageInput?.addEventListener("change", (e) => { enqueueFiles(e.target.files || []); imageInput.value = ""; });
+
+  document.addEventListener("paste", (e) => {
+    if (!currentConv) return;
+    const items = e.clipboardData?.items || [];
+    const files = [];
+    for (const it of items) if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f); }
+    enqueueFiles(files);
+  });
+
+  messagesEl?.addEventListener("dragover", (e) => e.preventDefault());
+  messagesEl?.addEventListener("drop", (e) => { e.preventDefault(); enqueueFiles(e.dataTransfer?.files || []); });
+
+  async function sendImages() {
+    if (!pendingFiles.length || !currentConv) return [];
+    const results = [];
+    for (const file of pendingFiles) {
+      const fd = new FormData();
+      fd.append("conversationId", currentConv);
+      fd.append("file", file); // khớp multer.single('file')
+
+      let msg = null, urlFromServer = null, localPreview = null;
+      try {
+        msg = await API.upload("/api/messages/upload", fd);
+        urlFromServer = msg?.image || msg?.url || msg?.imageUrl || msg?.contentUrl || null;
+      } catch (e) { console.warn("[upload] failed", e); }
+
+      if (!urlFromServer) localPreview = URL.createObjectURL(file);
+
+      const show = (msg && (msg._id || urlFromServer)) ? msg : {
+        _id: "local-img-" + Date.now(),
+        conversation: currentConv,
+        sender: ME_ID,
+        type: "image",
+        url: urlFromServer || localPreview,
+        image: urlFromServer || localPreview,
+        createdAt: new Date().toISOString(),
+      };
+
+      renderMessage(show);
+      results.push(show);
+      if (io) io.emit("message:new", { ...show, conversationId: currentConv });
+    }
+    pendingFiles = [];
+    refreshPreview();
+    return results;
+  }
+
+  // ========== NHÓM: GỌI API & luồng thao tác ==========
+  // - POST   /api/conversations/group           -> tạo nhóm {name, members[]}
+  // - PATCH  /api/conversations/:id/name        -> đổi tên nhóm {name}
+  // - POST   /api/conversations/:id/members     -> thêm thành viên {members:[]}
+  // - DELETE /api/conversations/:id/members/:u  -> xoá 1 thành viên
+  // - POST   /api/conversations/:id/leave       -> rời nhóm
+  // - GET    /api/conversations                 -> list hội thoại
+
+  async function renameGroupFlow() {
+    if (!currentConv) return;
+    const name = (prompt("Tên nhóm mới:") || "").trim();
+    if (!name) return;
+    try {
+      await API.patch(`/api/conversations/${currentConv}/name`, { name });
+      peerNameEl.textContent = name;
+      const row = document.querySelector(`.conv-list li[data-id="${currentConv}"] .title`);
+      if (row) row.textContent = name;
+      toast("Đã đổi tên nhóm");
+    } catch (e) {
+      toast(e?.message || "Đổi tên thất bại");
+    }
+  }
+
+  async function addMembersFlow() {
+    if (!currentConv) return;
+    const raw = (prompt("Nhập userId cần thêm (nhiều ID, cách nhau bởi dấu phẩy):") || "")
+      .split(",").map(s => s.trim()).filter(Boolean);
+    if (!raw.length) return;
+
+    try {
+      await API.post(`/api/conversations/${currentConv}/members`, { members: raw });
+      toast("Đã thêm thành viên");
+    } catch (e) {
+      toast(e?.message || "Thêm thành viên thất bại");
+    }
+  }
+
+  async function removeMemberFlow() {
+    if (!currentConv) return;
+    const uid = (prompt("Nhập userId cần xoá khỏi nhóm:") || "").trim();
+    if (!uid) return;
+    try {
+      await API.delete(`/api/conversations/${currentConv}/members/${uid}`);
+      toast("Đã xoá thành viên");
+    } catch (e) {
+      toast(e?.message || "Xoá thành viên thất bại");
+    }
+  }
+
+  async function leaveGroupFlow() {
+    if (!currentConv) return;
+    if (!confirm("Bạn chắc chắn rời nhóm?")) return;
+    try {
+      await API.post(`/api/conversations/${currentConv}/leave`, {});
+      toast("Đã rời nhóm");
+      currentConv = null;
+      await loadConversations();
+      peerNameEl.textContent = "Chọn một cuộc trò chuyện";
+      peerAvatarEl.textContent = "🙂";
+      peerStatusEl.textContent = "—";
+      if (messagesEl) messagesEl.innerHTML = "";
+    } catch (e) {
+      toast(e?.message || "Rời nhóm thất bại");
+    }
+  }
+
+  // ====== TẠO NHÓM BẰNG MODAL (UI chọn user) ======
+  async function openGroupModal() {
+    if (!modal) return; // nếu bạn chưa nhúng modal trong EJS thì bỏ qua
+    modal.classList.remove("hidden");
+    if (userListEl) userListEl.innerHTML = "<div style='padding:10px'>Đang tải...</div>";
+    try {
+      const res = await API.get("/api/user/profiles");
+      const list = res?.items || res?.users || res || [];
+      if (userListEl) {
+        userListEl.innerHTML = list
+          .filter(u => String(u._id || u.id) !== String(ME_ID))
+          .map(u => `
+            <label class="user-item">
+              <input type="checkbox" value="${u._id || u.id}">
+              <div class="avatar small">${getInitial(u.name || u.username || "U")}</div>
+              <div>${u.name || u.username || "Không tên"}</div>
+            </label>
+          `)
+          .join("");
+      }
+    } catch {
+      if (userListEl) userListEl.innerHTML = `<div style='padding:10px;color:red'>Lỗi tải danh sách</div>`;
+    }
+  }
+
+  function closeGroupModal() {
+    if (!modal) return;
+    modal.classList.add("hidden");
+    if (groupNameInput) groupNameInput.value = "";
+    if (userListEl) userListEl.innerHTML = "";
+  }
+
+  async function handleCreateGroup() {
+    if (!groupNameInput || !userListEl) return;
+    const name = groupNameInput.value.trim();
+    if (!name) return toast("Nhập tên nhóm");
+
+    const selected = [...userListEl.querySelectorAll("input:checked")].map(i => i.value);
+    if (!selected.length) return toast("Chọn ít nhất 1 người");
+
+    try {
+      const conv = await API.post("/api/conversations/group", { name, members: selected });
+      toast("Tạo nhóm thành công");
+      closeGroupModal();
+      await loadConversations();
+      openConversation(conv._id || conv.id, conv);
+    } catch (e) {
+      toast(e?.message || "Không thể tạo nhóm");
+    }
+  }
+
+  // Bind modal nếu tồn tại
+  if (newGroupBtnEl && modal) {
+    newGroupBtnEl.addEventListener("click", openGroupModal);
+    cancelGroupBtn?.addEventListener("click", closeGroupModal);
+    confirmGroupBtn?.addEventListener("click", handleCreateGroup);
+    modal.addEventListener("click", e => { if (e.target === modal) closeGroupModal(); });
+  } else if (newGroupBtnEl && !modal) {
+    // fallback: vẫn cho tạo nhóm bằng prompt nếu chưa gắn modal trong EJS
+    newGroupBtnEl.addEventListener("click", async () => {
+      const name = (prompt("Tên nhóm:") || "").trim();
+      if (!name) return;
+      const raw = (prompt("Nhập userId (cách nhau dấu phẩy):") || "")
+        .split(",").map(s => s.trim()).filter(Boolean);
+      try {
+        const conv = await API.post("/api/conversations/group", { name, members: raw });
+        toast("Đã tạo nhóm");
+        await loadConversations();
+        openConversation(conv._id || conv.id, conv);
+      } catch (e) { toast(e?.message || "Tạo nhóm thất bại"); }
+    });
+  }
+
+  // ========== MENU NHANH CHO HỘI THOẠI NHÓM ==========
+  document.addEventListener("contextmenu", (e) => {
+    const li = e.target.closest?.("li[data-id]");
+    if (!li) return;
+    const convId = li.dataset.id;
+    const isGroup = (li.querySelector(".avatar")?.textContent || "") === "👥";
+    if (!isGroup) return;
+    e.preventDefault();
+
+    const action = prompt(
+      "Chọn thao tác nhóm:\n" +
+      "1 = Đổi tên nhóm\n" +
+      "2 = Thêm thành viên\n" +
+      "3 = Xoá thành viên\n" +
+      "4 = Rời nhóm\n" +
+      "(ESC để huỷ)"
+    );
+    if (!action) return;
+
+    if (String(currentConv) !== String(convId)) {
+      const c = { _id: convId, type: "group" };
+      openConversation(convId, c);
+    }
+
+    switch (String(action).trim()) {
+      case "1": renameGroupFlow(); break;
+      case "2": addMembersFlow();  break;
+      case "3": removeMemberFlow();break;
+      case "4": leaveGroupFlow();  break;
+      default:  break;
+    }
+  }, false);
+})();

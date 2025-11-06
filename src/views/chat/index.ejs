@@ -1,0 +1,94 @@
+<%
+// Trang chat không cần navbar -> có thể tắt nếu muốn
+// locals.showNavbar = false;
+%>
+
+<!-- ==== PHẦN CHAT – chỉ markup nội dung, dễ style ==== -->
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <div class="brand">Talky</div>
+      <div class="search"><input id="searchInput" placeholder="Tìm kiếm" /></div>
+    </div>
+
+    <div class="me-card" id="meCard">
+      <div class="avatar" id="meAvatar">😊</div>
+      <div class="me-info">
+        <div class="me-name" id="meName">Bạn</div>
+        <div class="me-status online">Online</div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="all">Tất cả</button>
+      <button class="tab" data-tab="groups">Nhóm</button>
+      <button class="tab" data-tab="pinned">Ghim</button>
+      <button class="tab" data-tab="archived">Lưu trữ</button>
+    </div>
+
+    <ul class="conv-list" id="convList"></ul>
+
+    <div class="sidebar-footer">
+      <button id="newGroupBtn" class="btn outline small">+ Tạo nhóm</button>
+      <button id="logoutBtn" class="btn danger small">Đăng xuất</button>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <header class="chat-header">
+      <div class="contact">
+        <div class="avatar" id="peerAvatar">🙂</div>
+        <div class="meta">
+          <div id="peerName" class="name">Chọn một cuộc trò chuyện</div>
+          <div id="peerStatus" class="status">—</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="icon-btn" id="callBtn">📞</button>
+        <button class="icon-btn" id="videoBtn">🎥</button>
+        <button class="icon-btn" id="searchBtn">🔎</button>
+      </div>
+    </header>
+
+<section class="messages" id="messages" aria-live="polite"></section>
+<div id="typingIndicator" class="typing-indicator hidden">Đang nhập...</div>
+
+<!-- Thanh preview ảnh -->
+<div id="previewBar" class="preview-bar hidden" aria-live="polite"></div>
+
+<!-- ✅ Emoji picker: web component từ npm -->
+<emoji-picker id="emojiPicker" class="emoji-panel hidden"></emoji-picker>
+
+<footer class="composer">
+  <button class="icon-btn" id="emojiBtn" aria-label="Emoji">😊</button>
+  <input id="messageInput" placeholder="Nhập tin nhắn..." autocomplete="off" />
+  <input id="imageInput" type="file" accept="image/*" hidden />
+  <button class="icon-btn" id="attachBtn" aria-label="Đính kèm">📎</button>
+  <button class="btn primary" id="sendBtn">Gửi</button>
+</footer>
+
+  </main>
+  <!-- ==== Modal Tạo Nhóm ==== -->
+<div id="groupModal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Tạo nhóm mới</h3>
+    <label>Tên nhóm:</label>
+    <input type="text" id="groupNameInput" placeholder="Nhập tên nhóm...">
+
+    <div class="user-list" id="userList"></div>
+
+    <div class="actions">
+      <button class="btn outline" id="cancelGroupBtn">Hủy</button>
+      <button class="btn primary" id="confirmGroupBtn">Tạo nhóm</button>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<%
+// yield thêm scripts riêng của trang chat
+scripts = `
+  <script src="/js/chat.js"></script>
+`;
+%>

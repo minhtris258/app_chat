@@ -69,6 +69,42 @@ export const sendMessage = async (req, res) => {
 
   res.json(msg);
 };
+// POST /api/messages/upload
+export const uploadMessageImage = async (req, res, next) => {
+  try {
+    const sender = req.user?._id;
+    const { conversationId } = req.body;
+
+    if (!conversationId || !req.file) {
+      return res.status(400).json({ error: "Thiếu file hoặc conversationId" });
+    }
+
+    // Kiểm tra hội thoại + quyền giống sendMessage
+    const conv = await Conversation.findById(conversationId).select("_id members");
+    if (!conv) return res.status(404).json({ error: "Không tìm thấy hội thoại" });
+    const isMember = conv.members.some((m) => String(m) === String(sender));
+    if (!isMember) return res.status(403).json({ error: "Không có quyền" });
+
+    const imagePath = `/uploads/${req.file.filename}`;
+
+    const msg = await Message.create({
+      conversation: conversationId,
+      sender,
+      type: "image",
+      image: imagePath,
+    });
+
+    // cập nhật thời gian hoạt động gần nhất của hội thoại
+    await Conversation.findByIdAndUpdate(conversationId, { lastMessageAt: new Date() });
+
+    // Nếu có socket: req.io?.to(String(conversationId)).emit('message:new', { ...msg.toObject() });
+
+    res.json(msg);
+  } catch (err) {
+    next(err);
+  }
+};
+
 
 /** POST /api/messages/:id/recall
  * - Chỉ người gửi mới được thu hồi. Đặt timestamp vào field `recalled`.

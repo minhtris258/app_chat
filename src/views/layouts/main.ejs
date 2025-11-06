@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title || 'Talky' %></title>
+
+   <link rel="stylesheet" href="/css/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module" src="/vendor/emoji-picker-element/index.js"></script>
+  </head>
+  <%- typeof head !== 'undefined' ? head : '' %>
+</head>
+<body>
+  <!-- (tùy chọn) Navbar chung -->
+  <% if (typeof showNavbar === 'undefined' || showNavbar) { %>
+    <%- include('../partials/navbar') %>
+  <% } %>
+
+  <!-- Nội dung trang -->
+  <main class="main-content">
+    <%- body %>
+  </main>
+
+  <!-- Toast chung -->
+  <%- include('../partials/toast') %>
+
+  <!-- Scripts chung -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/api.js"></script>
+
+  <!-- yield script của từng trang -->
+  <%- typeof scripts !== 'undefined' ? scripts : '' %>
+</body>
+</html>

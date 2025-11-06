@@ -1,0 +1,23 @@
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="brand">Talky</div>
+    <h1>Tạo tài khoản</h1>
+    <form id="registerForm" class="form">
+      <label>Tên hiển thị</label>
+      <input name="username" placeholder="Tên của bạn" required />
+      <label>Email</label>
+      <input name="email" type="email" placeholder="you@example.com" required />
+      <label>Mật khẩu</label>
+      <input name="password" type="password" placeholder="••••••••" required />
+      <button class="btn primary" type="submit">Đăng ký</button>
+    </form>
+    <div class="muted">
+      Đã có tài khoản? <a href="/login">Đăng nhập</a>
+    </div>
+  </div>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+  window.AUTH_MODE = 'register';
+</script>

@@ -1,0 +1,204 @@
+/* ================== Tokens & Reset ================== */
+:root{
+  --bg:#0e0f12;
+  --panel:#17181d;
+  --panel-2:#1d1f26;
+  --text:#e9eef6;
+  --muted:#a9b1bd;
+  --brand:#5b8cff;
+  --success:#22c55e;
+  --danger:#ef4444;
+  --border:#2b2f38;
+  --shadow:0 10px 30px rgba(0,0,0,.25);
+  --sidebar-w:330px;
+  --composer-h:72px;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;background:var(--bg);color:var(--text)}
+a{color:var(--brand);text-decoration:none}
+.muted{color:var(--muted);font-size:.9rem}
+.hidden{display:none}
+
+/* ================== Auth ================== */
+.auth-wrap{display:grid;place-items:center;min-height:100vh;padding:24px}
+.auth-card{background:var(--panel);width:100%;max-width:420px;padding:28px;border-radius:16px;box-shadow:var(--shadow);border:1px solid var(--border)}
+.brand{font-weight:800;font-size:24px;margin-bottom:4px}
+.form{display:grid;gap:10px;margin-top:12px}
+input,button,select{font:inherit}
+input{background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:12px;padding:12px 14px;outline:none}
+input:focus{border-color:var(--brand)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border-radius:12px;border:1px solid var(--border);cursor:pointer;background:var(--panel-2);color:var(--text)}
+.btn.primary{background:var(--brand);border-color:transparent;color:#fff}
+.btn.outline{background:transparent}
+.btn.small{padding:6px 10px;border-radius:10px;font-size:.9rem}
+.btn.danger{background:transparent;border-color:var(--danger);color:var(--danger)}
+.icon-btn{background:transparent;border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;color:var(--text)}
+
+/* ================== Layout tổng ================== */
+.shell{display:grid;grid-template-columns:var(--sidebar-w) 1fr;height:100vh;overflow:hidden}
+
+/* ================== Sidebar ================== */
+.sidebar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column}
+.sidebar-top{padding:16px;border-bottom:1px solid var(--border)}
+.search input{width:100%;padding:10px 12px;border-radius:12px;background:var(--panel-2);border:1px solid var(--border);color:var(--text)}
+
+.me-card{display:flex;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.avatar{width:36px;height:36px;border-radius:50%;background:#2a2f3a;display:grid;place-items:center;color:#fff}
+.me-info .me-name{font-weight:600}
+.me-status{font-size:.8rem;color:var(--muted)}
+.me-status.online{color:var(--success)}
+
+.tabs{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
+.tab{flex:1;border:none;background:transparent;color:var(--muted);padding:8px;border-radius:10px;cursor:pointer;border:1px solid var(--border)}
+.tab.active{color:var(--text);background:var(--panel-2);border-color:transparent}
+
+.conv-list{list-style:none;margin:0;padding:0;overflow:auto;flex:1}
+.conv-list li{display:flex;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer}
+.conv-list li.active{background:var(--panel-2)}
+.conv-list .title{font-weight:600}
+.conv-list .last{font-size:.9rem;color:var(--muted)}
+.sidebar-footer{margin-top:auto;padding:12px;border-top:1px solid var(--border);display:flex;gap:8px}
+
+/* ================== Khu Chat ================== */
+.chat{display:flex;flex-direction:column;height:100vh;position:relative}
+
+/* Header */
+.chat-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}
+.contact{display:flex;gap:10px;align-items:center}
+.contact .name{font-weight:700}
+.contact .status{font-size:.85rem;color:var(--muted)}
+
+/* Danh sách tin nhắn */
+.messages{
+  flex:1;display:flex;flex-direction:column;gap:8px;
+  padding:16px;background:radial-gradient(100% 100% at 0 0,#121318 0,#0e0f12 100%);
+  overflow-y:auto;scroll-behavior:smooth;
+}
+
+/* Hàng tin nhắn = flex (avatar trái + bubble) */
+.messages .msg{display:flex;align-items:flex-end;gap:8px;margin:6px 0}
+.messages .msg.me{justify-content:flex-end}
+.messages .msg.other{justify-content:flex-start}
+
+/* Avatar nhỏ (đối phương) */
+.messages .msg .avatar.small{
+  width:28px;height:28px;border-radius:50%;
+  background:#555;color:#fff;font-size:13px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.messages .msg .avatar.small img{width:100%;height:100%;border-radius:50%;object-fit:cover}
+
+/* Bong bóng tin nhắn */
+.messages .msg .bubble{
+  max-width:min(72%,560px);
+  padding:10px 12px;border-radius:12px;
+  background:#2563eb;color:#fff;
+  box-shadow:0 2px 8px rgba(0,0,0,.25);
+  word-wrap:break-word;
+}
+.messages .msg.other .bubble{background:#2b2b2b;color:#eaeaea}
+
+/* Text/Emoji/Ảnh trong bubble */
+.messages .msg .bubble.image{padding:6px}
+.messages .msg .bubble .image{max-width:360px;border-radius:10px;display:block;border:1px solid var(--border)}
+.messages .msg .bubble.emoji{background:transparent;box-shadow:none;padding:0}
+.messages .msg .bubble .emoji-big{font-size:56px;line-height:1.15;display:inline-block}
+
+/* Thời gian trong bubble */
+.messages .msg .bubble .meta{font-size:12px;opacity:.7;margin-top:4px}
+
+/* Nhãn ngày */
+.date-badge{display:inline-block;padding:6px 10px;border-radius:999px;background:var(--panel);color:var(--muted);margin:8px auto;text-align:center}
+
+/* Typing indicator (nằm ngay trên composer) */
+.typing-indicator{
+  position:fixed;
+  bottom:calc(var(--composer-h) + 6px);
+  left:var(--sidebar-w);
+  right:0;
+  font-size:13px;color:#aaa;padding:0 16px;z-index:9;
+}
+
+/* Composer cố định đáy */
+.composer{
+  height:var(--composer-h);display:flex;align-items:center;gap:8px;
+  padding:10px 16px;border-top:1px solid var(--border);background:var(--panel);z-index:10;
+}
+.composer input{flex:1;border:none;background:var(--panel-2);color:var(--text);padding:10px 12px;border-radius:10px;outline:none}
+.composer input:focus{border-color:var(--brand)}
+.composer .btn.primary{background:var(--brand);color:#fff;border:none;border-radius:10px;padding:8px 14px}
+
+/* Emoji picker (web component) */
+emoji-picker.emoji-panel{
+  position:absolute;left:12px;bottom:calc(var(--composer-h) + 2px);z-index:30;
+  width:360px;height:300px;border-radius:14px;box-shadow:var(--shadow);
+  --background:var(--panel);--border-color:var(--border);
+  --button-hover-background:var(--panel-2);
+  --input-border-color:var(--border);--font:inherit;
+}
+emoji-picker.hidden{display:none}
+
+/* Preview ảnh dưới composer */
+.preview-bar{
+  position:fixed;left:var(--sidebar-w);right:0;bottom:calc(var(--composer-h) + 4px);z-index:19;
+  display:flex;gap:8px;align-items:center;padding:8px 12px;
+  background:rgba(0,0,0,.25);backdrop-filter:blur(4px);border-top:1px solid var(--border)
+}
+.preview-bar.hidden{display:none}
+.preview-item{position:relative}
+.preview-item img{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1px solid var(--border)}
+.preview-item .rm{
+  position:absolute;top:-8px;right:-8px;width:22px;height:22px;display:grid;place-items:center;
+  font-size:12px;cursor:pointer;background:#111;color:#fff;border:1px solid var(--border);border-radius:999px
+}
+
+/* Toast */
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#222;padding:10px 14px;border-radius:10px;color:#fff;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+
+/* ================== Responsive ================== */
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .sidebar{display:none}
+  .composer{left:0}
+  .typing-indicator{left:0}
+  .preview-bar{left:0}
+}
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  display: grid;
+  place-items: center;
+  z-index: 999;
+}
+.modal.hidden { display: none; }
+.modal-content {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  width: 360px;
+  box-shadow: var(--shadow);
+}
+.user-list {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.user-list .user-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.user-list .user-item:hover {
+  background: var(--panel-2);
+}
+.user-list .user-item input {
+  margin-right: 6px;
+}
