@@ -8,15 +8,14 @@ const toStr = (id) => String(id);
 
 /** POST /api/conversations/private
  */
+// conversation.controller.js (Phần cần sửa)
+
 export const createOrGetPrivate = async (req, res) => {
   const me = req.user._id;
   const { otherUserId } = req.body || {};
-  if (!otherUserId || toStr(otherUserId) === toStr(me)) {
-    return res.status(400).json({ error: "Người nhận không hợp lệ" });
-  }
-
   const exists = await User.exists({ _id: otherUserId });
-  if (!exists) return res.status(404).json({ error: "Người nhận không tồn tại" });
+  if (!exists)
+    return res.status(404).json({ error: "Người nhận không tồn tại" });
   let conv = await Conversation.findOne({
     type: "private",
     members: { $all: [me, otherUserId], $size: 2 },
@@ -27,7 +26,14 @@ export const createOrGetPrivate = async (req, res) => {
       type: "private",
       members: [me, otherUserId],
     });
+    if (req.sendToUser) {
+      req.sendToUser(otherUserId, "conversation:new", {
+        conversationId: conv._id,
+        conv: conv,
+      });
+    }
   }
+ 
 
   res.json(conv);
 };
@@ -39,9 +45,9 @@ export const createGroup = async (req, res) => {
   const { name, memberIds = [] } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: "Thiếu tên nhóm" });
 
-  const uniqueMembers = Array.from(new Set([toStr(owner), ...memberIds.map(toStr)])).map(
-    (id) => new mongoose.Types.ObjectId(id)
-  );
+  const uniqueMembers = Array.from(
+    new Set([toStr(owner), ...memberIds.map(toStr)])
+  ).map((id) => new mongoose.Types.ObjectId(id));
 
   const conv = await Conversation.create({
     type: "group",
@@ -76,7 +82,8 @@ export const listMyConversations = async (req, res) => {
     .select("-__v");
 
   // trả thêm nextCursor
-  const nextCursor = docs.length > 0 ? docs[docs.length - 1].updatedAt?.toISOString() : null;
+  const nextCursor =
+    docs.length > 0 ? docs[docs.length - 1].updatedAt?.toISOString() : null;
   res.json({ items: docs, nextCursor });
 };
 
@@ -106,10 +113,15 @@ export const renameGroup = async (req, res) => {
 
   const conv = await Conversation.findById(id);
   if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group") return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
-  if (toStr(conv.owner) !== toStr(me)) return res.status(403).json({ error: "Chỉ owner được đổi tên nhóm" });
+  if (conv.type !== "group")
+    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
+  if (toStr(conv.owner) !== toStr(me))
+    return res.status(403).json({ error: "Chỉ owner được đổi tên nhóm" });
 
-  await Conversation.updateOne({ _id: id }, { $set: { name: name?.trim() || "" } });
+  await Conversation.updateOne(
+    { _id: id },
+    { $set: { name: name?.trim() || "" } }
+  );
   res.json({ ok: true });
 };
 
@@ -122,7 +134,8 @@ export const addMembers = async (req, res) => {
 
   const conv = await Conversation.findById(id);
   if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group") return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
+  if (conv.type !== "group")
+    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
   if (toStr(conv.owner) !== toStr(me)) {
     return res.status(403).json({ error: "Chỉ owner được thêm thành viên" });
@@ -151,7 +164,8 @@ export const removeMember = async (req, res) => {
 
   const conv = await Conversation.findById(id);
   if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group") return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
+  if (conv.type !== "group")
+    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
   if (toStr(conv.owner) !== toStr(me)) {
     return res.status(403).json({ error: "Chỉ owner được gỡ thành viên" });
@@ -174,10 +188,15 @@ export const leaveGroup = async (req, res) => {
 
   const conv = await Conversation.findById(id);
   if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group") return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
+  if (conv.type !== "group")
+    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
   if (toStr(conv.owner) === toStr(me)) {
-    return res.status(400).json({ error: "Owner không thể rời nhóm, hãy chuyển quyền hoặc xoá nhóm" });
+    return res
+      .status(400)
+      .json({
+        error: "Owner không thể rời nhóm, hãy chuyển quyền hoặc xoá nhóm",
+      });
   }
 
   await Conversation.updateOne({ _id: id }, { $pull: { members: me } });
@@ -200,5 +219,7 @@ export const deleteConversation = async (req, res) => {
   }
 
   // với private: tuỳ policy (ở đây: không hỗ trợ xoá)
-  return res.status(400).json({ error: "Không hỗ trợ xoá cuộc trò chuyện private" });
+  return res
+    .status(400)
+    .json({ error: "Không hỗ trợ xoá cuộc trò chuyện private" });
 };

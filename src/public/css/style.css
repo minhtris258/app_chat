@@ -202,3 +202,64 @@ emoji-picker.hidden{display:none}
 .user-list .user-item input {
   margin-right: 6px;
 }
+.messages .msg .stack { display: flex; flex-direction: column; max-width: min(72%, 560px); }
+.messages .msg .sender-name {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 4px 4px;   /* hơi lệch phải cho đẹp */
+}
+
+/* === FIX: composer cố định + chừa đáy cho messages === */
+.chat { position: relative; }
+
+.composer{
+  position: fixed;
+  bottom: 0;
+  left: var(--sidebar-w);
+  right: 0;
+  height: var(--composer-h);
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  z-index: 20;                 /* cao hơn messages/preview */
+}
+
+/* chừa khoảng cho composer để tin nhắn không bị đè */
+.messages{
+  padding-bottom: calc(var(--composer-h) + 18px);
+}
+
+/* giữ vị trí indicator/preview ăn theo composer cố định */
+.typing-indicator{
+  left: var(--sidebar-w);
+  bottom: calc(var(--composer-h) + 6px);
+  z-index: 19;
+}
+.preview-bar{
+  left: var(--sidebar-w);
+  bottom: calc(var(--composer-h) + 4px);
+  z-index: 19;
+}
+
+/* Bên trong .stack giới hạn chiều rộng 1 lần, bubble lấy 100% để không bị hẹp kép */
+.messages .msg .stack{ max-width: min(72%, 560px); }
+.messages .msg .stack .bubble{ max-width: 100%; }
+
+/* Mobile: composer/indicator/preview bám mép trái */
+@media (max-width:900px){
+  .composer{ left: 0; right: 0; }
+  .typing-indicator{ left: 0; }
+  .preview-bar{ left: 0; }
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0;
+}
+.settings-section .btn {
+  justify-content: flex-start;
+  padding: 10px 12px;
+  font-size: 14px;
+}

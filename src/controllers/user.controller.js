@@ -40,3 +40,30 @@ export const getUserById = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+export const listUsers = async (req, res) => {
+  try {
+    const meId = req.user?.id;                 // từ verifyToken
+    const q = (req.query.q || "").trim();
+    const cond = { _id: { $ne: meId } };
+
+    if (q) {
+      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      cond.$or = [
+        { username: rx },
+        { displayName: rx },
+        { name: rx },
+        { fullName: rx },
+        { email: rx },
+      ];
+    }
+
+    const users = await User.find(cond)
+      .select("_id username displayName name fullName avatar status online")
+      .limit(100)
+      .lean();
+
+    res.json({ items: users });
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Server error" });
+  }
+};

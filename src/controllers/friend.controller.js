@@ -1,5 +1,7 @@
 import User from "../models/user.model.js";
 import FriendRequest from "../models/friendrequest.model.js";
+import Conversation from "../models/conversation.model.js";
+import Message from "../models/message.model.js";
 
 export const sendRequest = async (req, res) => {
   try {
@@ -37,7 +39,7 @@ export const cancelRequest = async (req, res) => {
 
 export const respondRequest = async (req, res) => {
   try {
-    const userId = req.user.id; // người nhận
+    const userId = req.user.id;      // người nhận lời mời
     const { from, action } = req.body; // action: accept | reject
 
     const fr = await FriendRequest.findOne({
@@ -48,19 +50,57 @@ export const respondRequest = async (req, res) => {
     if (!fr) return res.status(404).json({ message: "Không tìm thấy lời mời" });
 
     if (action === "accept") {
+      // 1) Cập nhật trạng thái & danh sách bạn
       fr.status = "accepted";
       await fr.save();
-      // cập nhật danh sách bạn
-      await User.updateOne({ _id: from }, { $addToSet: { friends: userId } });
+      await User.updateOne({ _id: from },   { $addToSet: { friends: userId } });
       await User.updateOne({ _id: userId }, { $addToSet: { friends: from } });
-      return res.status(200).json({ message: "Đã chấp nhận" });
-    } else if (action === "reject") {
+
+      // 2) Tạo (hoặc lấy) hội thoại private 2 người
+      let conv = await Conversation.findOne({
+        type: "private",
+        members: { $all: [from, userId], $size: 2 },
+      });
+
+      if (!conv) {
+        conv = await Conversation.create({
+          type: "private",
+          members: [from, userId],
+        });
+      }
+
+      // 3) Tạo tin nhắn chào mừng “đã là bạn”
+      const text = "🎉 Hai bạn đã trở thành bạn bè!";
+      const msg = await Message.create({
+        conversation: conv._id,
+        sender: userId,         // cho hệ thống: có thể để người chấp nhận gửi
+        type: "text",
+        text,
+        meta: { system: true, kind: "friend-accepted" },
+      });
+
+      // cập nhật lastMessage để sidebar có preview luôn
+      await Conversation.findByIdAndUpdate(conv._id, { $set: { lastMessage: msg._id } });
+
+      // 4) Bắn sự kiện socket để cả hai bên reload sidebar ngay (không cần F5)
+      if (req.sendToUser) {
+        req.sendToUser(from,   "conversation:new",    { conversationId: conv._id, conv });
+        req.sendToUser(userId, "conversation:new",    { conversationId: conv._id, conv });
+        // (tuỳ chọn) đẩy thêm 1 “message:new” để bên đối phương thấy message đầu tiên liền
+        req.sendToUser(from,   "message:new",         { ...msg.toObject(), conversationId: conv._id });
+        req.sendToUser(userId, "message:new",         { ...msg.toObject(), conversationId: conv._id });
+      }
+
+      return res.status(200).json({ message: "Đã chấp nhận", conversationId: conv._id });
+    }
+
+    if (action === "reject") {
       fr.status = "rejected";
       await fr.save();
       return res.status(200).json({ message: "Đã từ chối" });
-    } else {
-      return res.status(400).json({ message: "Hành động không hợp lệ" });
     }
+
+    return res.status(400).json({ message: "Hành động không hợp lệ" });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

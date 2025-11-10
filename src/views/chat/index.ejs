@@ -28,7 +28,9 @@
 
     <ul class="conv-list" id="convList"></ul>
 
-    <div class="sidebar-footer">
+<div class="sidebar-footer">
+      <button id="requestsBtn" class="btn outline small">🔔 Yêu cầu KB (<span id="requestCount">0</span>)</button>
+      <button id="searchFriendBtn" class="btn outline small">🔎 Tìm bạn</button>
       <button id="newGroupBtn" class="btn outline small">+ Tạo nhóm</button>
       <button id="logoutBtn" class="btn danger small">Đăng xuất</button>
     </div>
@@ -47,6 +49,8 @@
         <button class="icon-btn" id="callBtn">📞</button>
         <button class="icon-btn" id="videoBtn">🎥</button>
         <button class="icon-btn" id="searchBtn">🔎</button>
+        <button class="icon-btn" id="groupSettingsBtn" title="Cài đặt nhóm">⚙️</button>
+
       </div>
     </header>
 
@@ -83,7 +87,47 @@
     </div>
   </div>
 </div>
-
+<!-- ==== Modal Cài đặt Nhóm ==== -->
+<div id="groupSettingsModal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Cài đặt nhóm</h3>
+    <div class="settings-section">
+      <button class="btn outline" id="renameGroupBtn">✏️ Đổi tên nhóm</button>
+      <button class="btn outline" id="addMemberBtn">➕ Thêm thành viên</button>
+      <button class="btn outline" id="removeMemberBtn">➖ Xóa thành viên</button>
+      <button class="btn outline danger" id="leaveGroupBtn">🚪 Rời nhóm</button>
+    </div>
+    <div class="actions">
+      <button class="btn" id="closeGroupSettingsBtn">Đóng</button>
+    </div>
+  </div>
+</div>
+<div id="friendSearchModal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Tìm kiếm Bạn bè</h3>
+    <div class="search-input-group">
+      <input type="text" id="friendSearchInput" placeholder="Nhập tên, username hoặc email..." />
+      <button class="btn primary" id="doFriendSearchBtn">Tìm</button>
+    </div>
+    <div class="user-list" id="friendSearchResultList" style="max-height: 40vh; overflow-y: auto;">
+      <div style='padding:10px'>Tìm kiếm để bắt đầu...</div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="closeFriendSearchBtn">Đóng</button>
+    </div>
+  </div>
+</div>
+<div id="friendRequestsModal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Yêu cầu Kết bạn Đến</h3>
+    <div class="user-list" id="friendRequestList" style="max-height: 50vh; overflow-y: auto;">
+      <div style='padding:10px'>Đang tải yêu cầu...</div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="closeFriendRequestsBtn">Đóng</button>
+    </div>
+  </div>
+</div>
 </div>
 
 <%

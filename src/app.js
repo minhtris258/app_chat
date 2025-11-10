@@ -6,8 +6,13 @@ import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import expressLayouts from "express-ejs-layouts";
+import http from 'http'; // 💡 Cần import http
+import { Server as SocketIOServer } from 'socket.io'; // 💡 Cần import Socket.IO Server
 
-// Routers
+// 💡 IMPORT CÁC HÀM SOCKET TỪ INDEX.JS
+import { socketInit, sendToUser } from "./sockets/index.js"; 
+
+// Routers (GIỮ NGUYÊN)
 import UserRouter from "./routes/user.routes.js";
 import AuthRouter from "./routes/auth.routes.js";
 import FriendRouter from "./routes/friend.routes.js";
@@ -20,16 +25,37 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// 💡 KHỞI TẠO HTTP SERVER VÀ SOCKET.IO
+const server = http.createServer(app);
+const io = new SocketIOServer(server, { 
+  cors: {
+    origin: true,          
+    credentials: true,
+  }
+});
+
+// Chạy logic Socket Listeners
+socketInit(io);
+
 // ===== Core middlewares =====
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
-    origin: true,          // hoặc ['http://localhost:5173', ...]
+    origin: true,
     credentials: true,
   })
 );
 app.use(cookieParser());
+
+
+// 🚀 MIDDLEWARE QUAN TRỌNG: Inject Socket vào mọi request API
+app.use((req, res, next) => {
+    req.io = io; // Gán toàn bộ instance Socket.IO
+    // Gán hàm sendToUser, truyền io instance vào bên trong
+    req.sendToUser = (userId, eventName, payload) => sendToUser(io, userId, eventName, payload);
+    next();
+});
 
 // ===== View engine + layouts =====
 app.set("view engine", "ejs");
@@ -38,13 +64,8 @@ app.use(expressLayouts);
 app.set("layout", "layouts/main");
 
 // ===== Static assets =====
-// public (CSS/JS của app)
 app.use(express.static(path.join(__dirname, "public")));
-
-// vendor (thư viện từ node_modules nếu cần import trực tiếp phía client)
 app.use("/vendor", express.static(path.join(__dirname, "..", "node_modules")));
-
-// uploads (nơi multer lưu ảnh): QUAN TRỌNG để client load ảnh đã upload
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // ===== Pages =====
@@ -56,7 +77,6 @@ app.get("/register", (req, res) =>
   res.render("auth/register", { title: "Đăng ký" })
 );
 
-// Trang chat chính (SPA/ejs)
 app.get("/", (req, res) => {
   res.render("chat/index", {
     title: "Chat App",
@@ -64,7 +84,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// ===== APIs =====
+// ===== APIs (Giờ đã có thể truy cập req.sendToUser và req.io) =====
 app.use("/api/auth", AuthRouter);
 app.use("/api/user", UserRouter);
 app.use("/api/friends", FriendRouter);
@@ -85,4 +105,5 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ message: err.message || "Internal Server Error" });
 });
 
+// 💡 EXPORT SERVER HTTP CHỨ KHÔNG PHẢI APP
 export default app;

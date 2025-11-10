@@ -1,26 +1,51 @@
-// src/sockets/index.js
 import jwt from "jsonwebtoken";
 
+// ====== Quản lý online status (đa tab/đa socket) ======
+// userId -> Set<socketId>
+const onlineUsers = new Map();
+
+function markOnline(io, userId, socketId) {
+  const set = onlineUsers.get(userId) || new Set();
+  set.add(socketId);
+  onlineUsers.set(userId, set);
+  if (set.size === 1) io.emit("user:status", { userId, online: true });
+}
+
+function markOffline(io, userId, socketId) {
+  const set = onlineUsers.get(userId);
+  if (!set) return;
+  set.delete(socketId);
+  if (set.size === 0) {
+    onlineUsers.delete(userId);
+    io.emit("user:status", { userId, online: false });
+  } else {
+    onlineUsers.set(userId, set);
+  }
+}
+
 /**
- * Khởi tạo Socket.IO cho app.
- * Client nên connect như sau:
- *   io({
- *     withCredentials: true,
- *     auth: { token: "<JWT>" } // hoặc header Authorization: Bearer <JWT>
- *   })
- *
- * Events:
- *  - conversation:join { conversationId | conversation | roomId | convId }
- *  - conversations:join [ids]
- *  - message:new { conversationId | conversation | roomId | convId, ...payload }
- *  - typing:start { conversationId, userId }
- *  - typing:stop  { conversationId, userId }
- *  - (server -> client) typing { conversationId, userId, isTyping }
- *  - (server -> client) user:status { userId, online }
+ * Gửi sự kiện đến TẤT CẢ các tab/socket đang mở của một người dùng.
+ * Hàm này sẽ được Express Controller gọi qua req.sendToUser
+ * @param {object} io - Instance Socket.IO.
+ * @param {string} userId - ID người dùng cần nhận thông báo.
+ * @param {string} eventName - Tên sự kiện.
+ * @param {object} payload - Dữ liệu kèm theo.
  */
-export default function socketInit(io) {
+export const sendToUser = (io, userId, eventName, payload) => {
+  const set = onlineUsers.get(String(userId));
+  if (!set) return;
+
+  set.forEach((socketId) => {
+    io.to(socketId).emit(eventName, payload);
+  });
+};
+
+
+// Hàm khởi tạo chính (Logic Socket Listeners)
+export const socketInit = (io) => { // Đổi export default thành export const
   // ====== Auth middleware (JWT ở handshake) ======
   io.use((socket, next) => {
+    // Logic xác thực token và gán socket.user (GIỮ NGUYÊN)
     try {
       const bearer = socket.handshake.headers?.authorization || "";
       const token =
@@ -53,45 +78,17 @@ export default function socketInit(io) {
     }
   });
 
-  // ====== Quản lý online status (đa tab/đa socket) ======
-  // userId -> Set<socketId>
-  const onlineUsers = new Map();
-
-  function markOnline(userId, socketId) {
-    const set = onlineUsers.get(userId) || new Set();
-    set.add(socketId);
-    onlineUsers.set(userId, set);
-    // nếu trước đó offline (set.size vừa từ 0 -> 1), phát online
-    if (set.size === 1) io.emit("user:status", { userId, online: true });
-  }
-
-  function markOffline(userId, socketId) {
-    const set = onlineUsers.get(userId);
-    if (!set) return;
-    set.delete(socketId);
-    if (set.size === 0) {
-      onlineUsers.delete(userId);
-      io.emit("user:status", { userId, online: false });
-    } else {
-      onlineUsers.set(userId, set);
-    }
-  }
-
   // ====== Connection ======
   io.on("connection", (socket) => {
-    const userId = socket.user?.id; // đã chuẩn hóa ở middleware
+    // Logic listeners (GIỮ NGUYÊN)
+    const userId = socket.user?.id;
     console.log(`⚡ Socket connected ${socket.id} user=${socket.user?.username}`);
 
-    // đánh dấu online (đa tab)
-    if (userId) markOnline(userId, socket.id);
+    if (userId) markOnline(io, userId, socket.id);
 
     // Join 1 phòng
     socket.on("conversation:join", (payload = {}) => {
-      const id =
-        payload.conversationId ||
-        payload.conversation ||
-        payload.roomId ||
-        payload.convId;
+      const id = payload.conversationId || payload.conversation || payload.roomId || payload.convId;
       if (!id) return;
       socket.join(String(id));
     });
@@ -146,7 +143,7 @@ export default function socketInit(io) {
 
     socket.on("disconnect", () => {
       console.log(`🔌 Socket disconnected ${socket.id}`);
-      if (userId) markOffline(userId, socket.id);
+      if (userId) markOffline(io, userId, socket.id); // <== SỬA: Thêm io
     });
   });
 }
