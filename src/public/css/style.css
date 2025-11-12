@@ -212,18 +212,6 @@ emoji-picker.hidden{display:none}
 /* === FIX: composer cố định + chừa đáy cho messages === */
 .chat { position: relative; }
 
-.composer{
-  position: fixed;
-  bottom: 0;
-  left: var(--sidebar-w);
-  right: 0;
-  height: var(--composer-h);
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-  z-index: 20;                 /* cao hơn messages/preview */
-}
 
 /* chừa khoảng cho composer để tin nhắn không bị đè */
 .messages{
@@ -263,3 +251,40 @@ emoji-picker.hidden{display:none}
   padding: 10px 12px;
   font-size: 14px;
 }
+.msg { position: relative; }
+
+.msg .kebab {
+  opacity: 0; pointer-events: none; border: 0; background: transparent;
+  font-size: 18px; line-height: 1; cursor: pointer;
+  color: white;
+}
+.msg:hover .kebab { opacity: 1; pointer-events: auto; }
+
+.msg.other .menu {
+    position: absolute;
+    /* left: 0; */
+    top: 64px;
+    background: var(--bg2, #222);
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 8px;
+    padding: 6px;
+    min-width: 160px;
+    z-index: 10;
+}
+.msg.me .menu {
+    position: absolute;
+    /* right: 25%; */
+    justify-self: flex-end;
+    background: var(--bg2, #222);
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 8px;
+    padding: 6px;
+    min-width: 160px;
+    z-index: 10;
+}
+.msg .menu.hidden { display: none; }
+.msg .menu button {
+  display: block; width: 100%; text-align: left; padding: 6px 8px;
+  background: none; border: 0; cursor: pointer; color: white;
+}
+.msg .menu button:hover { background: rgba(255,255,255,.08); }

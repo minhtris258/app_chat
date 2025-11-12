@@ -12,6 +12,11 @@
   const peerAvatarEl = document.getElementById("peerAvatar");
   const peerStatusEl = document.getElementById("peerStatus");
   const newGroupBtnEl = document.getElementById("newGroupBtn"); // nút ở sidebar
+  const tabs = document.querySelectorAll(".tabs .tab");
+  const searchInputEl = document.getElementById("searchInput");
+
+  let CONV_CACHE = [];         // cache toàn bộ conversations
+  let CURRENT_FILTER = "all";  // all | direct | groups
 
   // ===== NHÓM: phần tử modal (nếu có trong EJS) =====
   const modal = document.getElementById("groupModal");
@@ -24,7 +29,7 @@
   let currentConv = null;
   let currentConvIsGroup = false;
   let currentPeer = null; // { _id, name, online } hoặc null (chỉ áp dụng direct)
-  let io = null;
+  let socket = null;
   let ME_ID = sessionStorage.getItem("ME_ID") || null;
   let pollTimer = null;
   let lastMsgAt = 0;
@@ -139,7 +144,10 @@
           "";
     return n.trim() ? n.trim().charAt(0).toUpperCase() : "🙂";
   };
-
+  function isGroupConv(c) {
+    return c?.type === "group" ||
+           (Array.isArray(c?.members) && c.members.length > 2);
+  }
   function getDisplayNameFromUser(u) {
     return (
       u?.displayName || u?.username || u?.name || u?.fullName || "Không tên"
@@ -161,113 +169,125 @@
     });
   }
 
-  function renderMessage(m) {
-    if (!messagesEl) return;
-    const sender = (getSenderId(m) || "") + "";
-    const created = m.createdAt || m.created_at || Date.now();
-    const mine = String(sender) === String(ME_ID);
+function renderMessage(m) {
+  if (!messagesEl) return;
+  const sender = (getSenderId(m) || "") + "";
+  const created = m.createdAt || m.created_at || Date.now();
+  const mine = String(sender) === String(ME_ID);
 
-    let type = m.type;
-    if (!type && typeof m.text === "string" && isOnlyEmoji(m.text))
-      type = "emoji";
+  const msgId = m._id || m.id || null;
 
-    const row = document.createElement("div");
-    row.className = "msg " + (mine ? "me" : "other");
-    row.dataset.sender = sender;
+  let type = m.type;
+  if (!type && typeof m.text === "string" && isOnlyEmoji(m.text)) type = "emoji";
 
-    // === Avatar trái cho đối phương ===
+  const row = document.createElement("div");
+  row.className = "msg " + (mine ? "me" : "other");
+  row.dataset.sender = sender;
+  if (msgId) row.dataset.id = msgId;
+
+  // === Avatar trái cho đối phương ===
+  if (!mine) {
     let initial = "🙂";
-    if (!mine) {
-      const ava = document.createElement("div");
-      ava.className = "avatar small";
-
-      if (m.sender && typeof m.sender === "object") {
-        initial = getInitial(m.sender);
-        const sid = String(m.sender._id || m.sender.id || sender);
-        if (sid) USER_CACHE.set(sid, m.sender);
-      } else {
-        const cached = USER_CACHE.get(String(sender));
-        if (cached) {
-          initial = getInitial(cached);
-        } else if (sender) {
-          (async () => {
-            try {
-              const u = await fetchUserById(sender);
-              if (u) {
-                USER_CACHE.set(String(sender), u);
-                // cập nhật lại ký tự avatar sau khi fetch xong
-                ava.textContent = getInitial(u);
-                // cũng có thể cập nhật tên ở label nếu muốn (tối giản: bỏ qua)
-              }
-            } catch {}
-          })();
-        }
-      }
-      ava.textContent = initial;
-      row.appendChild(ava);
-    }
-
-    // === Cột phải: tên (nếu group & other) + bubble ===
-    const stack = document.createElement("div");
-    stack.className = "stack";
-
-    // 👉 Chèn tên khi là GROUP và KHÔNG phải mình
-    if (currentConvIsGroup && !mine) {
-      let displayName = getDisplayNameFromMessage(m, sender);
-      if (!displayName && sender) {
-        // nếu chưa có tên, fetch (không block render)
+    const ava = document.createElement("div");
+    ava.className = "avatar small";
+    if (m.sender && typeof m.sender === "object") {
+      initial = getInitial(m.sender);
+      const sid = String(m.sender._id || m.sender.id || sender);
+      if (sid) USER_CACHE.set(sid, m.sender);
+    } else {
+      const cached = USER_CACHE.get(String(sender));
+      if (cached) {
+        initial = getInitial(cached);
+      } else if (sender) {
         (async () => {
           try {
             const u = await fetchUserById(sender);
             if (u) {
               USER_CACHE.set(String(sender), u);
-              // tìm đúng node để cập nhật
-              const nameNode = stack.querySelector(".sender-name");
-              if (nameNode) nameNode.textContent = getDisplayNameFromUser(u);
+              ava.textContent = getInitial(u);
             }
           } catch {}
         })();
       }
-      const nameEl = document.createElement("div");
-      nameEl.className = "sender-name";
-      nameEl.textContent = displayName || "Đang tải...";
-      stack.appendChild(nameEl);
     }
-
-    // Bubble
-    const bubble = document.createElement("div");
-    bubble.className =
-      "bubble" +
-      (type === "emoji" ? " emoji" : "") +
-      (type === "image" ? " image" : "");
-
-    if (type === "image" || m.type === "image") {
-      const src = m.image || m.url || m.imageUrl || m.contentUrl || "";
-      bubble.innerHTML = `
-      <img class="image" src="${src}" alt="image">
-      <div class="meta">${fmtTime(created)}</div>
-    `;
-    } else if (type === "emoji") {
-      const emoji = m.emoji || m.text || "";
-      bubble.innerHTML = `
-      <div class="emoji-big">${emoji}</div>
-      <div class="meta">${fmtTime(created)}</div>
-    `;
-    } else {
-      bubble.innerHTML = `
-      <div class="text">${m.text || ""}</div>
-      <div class="meta">${fmtTime(created)}</div>
-    `;
-    }
-
-    stack.appendChild(bubble);
-    row.appendChild(stack);
-    messagesEl.appendChild(row);
-
-    const t = +new Date(created);
-    if (!Number.isNaN(t)) lastMsgAt = Math.max(lastMsgAt, t);
-    scrollToBottom();
+    ava.textContent = initial;
+    row.appendChild(ava);
   }
+
+  // === Cột phải: tên (nếu group & other) + bubble ===
+  const stack = document.createElement("div");
+  stack.className = "stack";
+
+  if (currentConvIsGroup && !mine) {
+    let displayName = getDisplayNameFromMessage(m, sender);
+    if (!displayName && sender) {
+      (async () => {
+        try {
+          const u = await fetchUserById(sender);
+          if (u) {
+            USER_CACHE.set(String(sender), u);
+            const nameNode = stack.querySelector(".sender-name");
+            if (nameNode) nameNode.textContent = getDisplayNameFromUser(u);
+          }
+        } catch {}
+      })();
+    }
+    const nameEl = document.createElement("div");
+    nameEl.className = "sender-name";
+    nameEl.textContent = displayName || "Đang tải...";
+    stack.appendChild(nameEl);
+  }
+
+  // === Bubble ===
+  const bubble = document.createElement("div");
+  bubble.className = "bubble" + (type === "emoji" ? " emoji" : "") + (type === "image" ? " image" : "");
+
+  if (type === "image" || m.type === "image") {
+    const src = m.image || m.url || m.imageUrl || m.contentUrl || "";
+    bubble.innerHTML = `
+      <img class="image" src="${src}" alt="image">
+      <div class="meta">${fmtTime(created)}</div>`;
+  } else if (type === "emoji") {
+    const emoji = m.emoji || m.text || "";
+    bubble.innerHTML = `
+      <div class="emoji-big">${emoji}</div>
+      <div class="meta">${fmtTime(created)}</div>`;
+  } else {
+    const text = (m.recalled ? "Tin nhắn đã được thu hồi" : (m.text || ""));
+    bubble.innerHTML = `
+      <div class="text">${text}</div>
+      <div class="meta">${fmtTime(created)}</div>`;
+  }
+
+  // === Ba chấm + menu ===
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+  actions.innerHTML = `
+    <button class="kebab" ${msgId ? "" : "disabled"} title="Hành động">⋯</button>
+    <div class="menu hidden">
+      <button class="act-delete-me">Gỡ ở bạn</button>
+      ${mine ? `<button class="act-recall">Thu hồi mọi người</button>` : ""}
+    </div>`;
+
+ stack.appendChild(bubble);
+
+// .me: actions trước bubble ; .other: actions sau bubble
+if (mine) {
+  row.appendChild(actions);  // trước
+  row.appendChild(stack);
+} else {
+  row.appendChild(stack);
+  row.appendChild(actions);  // sau
+}
+
+messagesEl.appendChild(row);
+
+  const t = +new Date(created);
+  if (!Number.isNaN(t)) lastMsgAt = Math.max(lastMsgAt, t);
+  scrollToBottom();
+}
+
+
 
   function renderDateBadge(label) {
     if (!messagesEl) return;
@@ -372,6 +392,7 @@
       console.warn("Could not load friends list:", e);
     }
   }
+  
   async function loadConversations() {
     if (!convList) return;
     convList.innerHTML = "";
@@ -429,18 +450,87 @@
       }
     });
   }
+  function renderConvList() {
+    if (!convList) return;
+    convList.innerHTML = "";
+
+    const q = (searchInputEl?.value || "").trim().toLowerCase();
+
+    // lọc theo tab + từ khóa
+    const filtered = CONV_CACHE.filter((c) => {
+      if (CURRENT_FILTER === "groups" && !isGroupConv(c)) return false;
+      if (CURRENT_FILTER === "direct" && isGroupConv(c))  return false;
+
+      if (q) {
+        const title = (getConversationTitle(c, ME_ID) || "").toLowerCase();
+        if (!title.includes(q)) return false;
+      }
+      return true;
+    });
+
+    // render lại danh sách
+    filtered.forEach((c) => {
+      const convId = c._id || c.id;
+      const peerRaw = getPeer(c, ME_ID);
+      if (peerRaw && typeof peerRaw === "object") {
+        const pid = String(normalizeId(peerRaw));
+        if (pid) USER_CACHE.set(pid, peerRaw);
+      }
+      const peerId = normalizeId(peerRaw);
+      const title = getConversationTitle(c, ME_ID);
+
+      const li = document.createElement("li");
+      li.dataset.id = convId;
+      li.dataset.type = isGroupConv(c) ? "group" : "direct";
+      if (peerId) li.dataset.user = peerId;
+
+      const avaChar =
+        isGroupConv(c) ? "👥"
+        : typeof peerRaw === "object" ? pickAvatar(peerRaw)
+        : c.peerName?.[0]?.toUpperCase() || "👤";
+
+      const last = c.lastMessage?.text || c.last?.text || c.preview?.text || "";
+      const updated =
+        c.updatedAt || c.lastMessage?.createdAt || c.last?.createdAt;
+
+      li.innerHTML = `
+        <div class="avatar">${avaChar}</div>
+        <div class="col">
+          <div class="title">${title}</div>
+          <div class="last">${last}</div>
+        </div>
+        <div class="time">${updated ? fmtTime(updated) : ""}</div>
+        <div class="status">⚫</div>
+      `;
+      li.addEventListener("click", () => openConversation(convId, c));
+      convList.appendChild(li);
+
+      // nếu title “Không tên” mà chỉ có peerId -> fetch user để cập nhật
+      if (title === "Không tên" && peerId) {
+        (async () => {
+          const u = await fetchUserById(peerId);
+          if (!u) return;
+          const row = convList.querySelector(`li[data-id="${convId}"]`);
+          if (!row) return;
+          row.querySelector(".title").textContent = pickName(u);
+          row.querySelector(".avatar").textContent = pickAvatar(u);
+          row.dataset.user = u._id || peerId;
+        })();
+      }
+    });
+  }
 
   // ===== SOCKET =====
   function ensureSocket() {
-    if (io) return;
+    if (socket) return;
 
     const token = localStorage.getItem("TOKEN");
-    io = window.io({
+    socket = window.io({
       withCredentials: true,
       auth: token ? { token } : undefined,
     });
 
-    io.on("connect", () => {
+    socket.on("connect", () => {
       console.log("socket connected");
       refreshPeerOnline();
     });
@@ -450,13 +540,13 @@
         (m.conversationId || m.conversation || m.convId || m.roomId) + "";
       if (String(convId) === String(currentConv)) renderMessage({ ...m });
     };
-    io.on("message:new", onIncoming);
-    io.on("message:created", onIncoming);
-    io.on("chat:message", onIncoming);
-   io.on("message", onIncoming);
+    socket.on("message:new", onIncoming);
+    socket.on("message:created", onIncoming);
+    socket.on("chat:message", onIncoming);
+    socket.on("message", onIncoming);
 
     // Xử lý tin nhắn đến từ cuộc hội thoại CHƯA ĐƯỢC MỞ (Global event) <== THÊM MỚI
-    io.on("notification:message", (m) => {
+    socket.on("notification:message", (m) => {
       const convId = m.conversationId || m.conversation || m.convId;
       if (String(convId) === String(currentConv)) {
         // Nếu đã mở, chỉ render (sự kiện onIncoming đã xử lý)
@@ -465,11 +555,13 @@
         // Nếu chưa mở: Chỉ cần tải lại danh sách hội thoại để cập nhật preview.
         // loadConversations() sẽ tự cập nhật sidebar và tên người gửi.
         loadConversations();
-        toast(`Tin nhắn mới từ ${getDisplayNameFromMessage(m, getSenderId(m))}`);
+        toast(
+          `Tin nhắn mới từ ${getDisplayNameFromMessage(m, getSenderId(m))}`
+        );
       }
     });
 
-    io.on("typing", ({ conversationId, userId, isTyping }) => {
+    socket.on("typing", ({ conversationId, userId, isTyping }) => {
       if (String(conversationId) !== String(currentConv)) return;
       if (ME_ID && String(userId) === String(ME_ID)) return;
       if (isTyping) {
@@ -484,19 +576,19 @@
       }
     });
 
-    io.on("conversation:created", () => loadConversations());
+    socket.on("conversation:created", () => loadConversations());
 
     // THÊM LISTENER MỚI để cập nhật danh sách hội thoại global
     const onConvUpdate = () => {
-        console.log("Cập nhật danh sách hội thoại do sự kiện socket");
-        loadConversations();
+      console.log("Cập nhật danh sách hội thoại do sự kiện socket");
+      loadConversations();
     };
-    
-    io.on("conversation:update", onConvUpdate); // Lắng nghe sự kiện từ server
-    io.on("conversation:new", onConvUpdate);
+
+    socket.on("conversation:update", onConvUpdate); // Lắng nghe sự kiện từ server
+    socket.on("conversation:new", onConvUpdate);
 
     // online / offline
-    io.on("user:status", ({ userId, online }) => {
+    socket.on("user:status", ({ userId, online }) => {
       if (
         currentPeer &&
         String(currentPeer._id || currentPeer.id) === String(userId)
@@ -509,6 +601,18 @@
       );
       if (dot) dot.textContent = online ? "🟢" : "⚫";
     });
+    socket.on("message:recalled", ({ messageId }) => {
+  const row = messagesEl?.querySelector(`.msg[data-id="${messageId}"]`);
+  if (row) {
+    const textEl = row.querySelector(".bubble .text");
+    if (textEl) textEl.textContent = "Tin nhắn đã được thu hồi";
+    // Ẩn menu nếu đang mở
+    row.querySelector(".menu")?.classList.add("hidden");
+  } else {
+    // Nếu đang ở phòng khác thì làm mới sidebar để update preview
+    loadConversations();
+  }
+});
   }
 
   // ===== POLLING (fallback) =====
@@ -539,22 +643,28 @@
 
   // ===== TYPING (client emits) =====
   function emitTypingStart() {
-    if (!io || !currentConv || typingSent || !ME_ID) return;
-    io.emit("typing:start", { conversationId: currentConv, userId: ME_ID });
+    if (!socket || !currentConv || typingSent || !ME_ID) return;
+    socket.emit("typing:start", { conversationId: currentConv, userId: ME_ID });
     typingSent = true;
   }
   function scheduleTypingStop() {
     clearTimeout(typingIdleTimer);
     typingIdleTimer = setTimeout(() => {
-      if (io && currentConv && ME_ID)
-        io.emit("typing:stop", { conversationId: currentConv, userId: ME_ID });
+      if (socket && currentConv && ME_ID)
+        socket.emit("typing:stop", {
+          conversationId: currentConv,
+          userId: ME_ID,
+        });
       typingSent = false;
     }, 1500);
   }
   function forceTypingStop() {
     clearTimeout(typingIdleTimer);
-    if (io && currentConv && ME_ID)
-      io.emit("typing:stop", { conversationId: currentConv, userId: ME_ID });
+    if (socket && currentConv && ME_ID)
+      socket.emit("typing:stop", {
+        conversationId: currentConv,
+        userId: ME_ID,
+      });
     typingSent = false;
   }
 
@@ -644,7 +754,7 @@
     }
 
     ensureSocket();
-    io.emit("conversation:join", {
+    socket.emit("conversation:join", {
       conversationId: id,
       conversation: id,
       roomId: id,
@@ -697,8 +807,8 @@
                 createdAt: new Date().toISOString(),
               };
         renderMessage(show);
-        if (io)
-          io.emit("message:new", { ...show, conversationId: currentConv });
+        if (socket)
+          socket.emit("message:new", { ...show, conversationId: currentConv });
         forceTypingStop();
         return;
       } catch (e) {
@@ -711,7 +821,7 @@
   // === HỎI LẠI TRẠNG THÁI ONLINE BAN ĐẦU ===
   function refreshPeerOnline() {
     if (!io || !currentPeer) return;
-    io.emit("user:whoOnline", {}, (resp) => {
+    socket.emit("user:whoOnline", {}, (resp) => {
       const list = resp?.users || [];
       const uid = String(currentPeer._id || currentPeer.id);
       const on = list.some((x) => String(x) === uid);
@@ -752,11 +862,73 @@
     API.setToken(null);
     location.href = "/login";
   });
+// Toggle menu ba chấm
+messagesEl?.addEventListener("click", (e) => {
+  const kebab = e.target.closest(".kebab");
+  const row = e.target.closest(".msg");
+  if (kebab && row) {
+    const menu = row.querySelector(".menu");
+    document.querySelectorAll(".msg .menu").forEach(m => m.classList.add("hidden"));
+    menu?.classList.toggle("hidden");
+  }
+
+  // Gỡ ở bạn
+  const delBtn = e.target.closest(".act-delete-me");
+  if (delBtn) {
+    const row = e.target.closest(".msg");
+    const id = row?.dataset.id;
+    if (!id) return toast("Tin vừa gửi chưa có ID—thử lại sau.");
+    deleteForMe(id, row);
+  }
+
+  // Thu hồi mọi người (chỉ hiện với tin của mình)
+  const recallBtn = e.target.closest(".act-recall");
+  if (recallBtn) {
+    const row = e.target.closest(".msg");
+    const id = row?.dataset.id;
+    if (!id) return toast("Tin vừa gửi chưa có ID—thử lại sau.");
+    recallMessage(id, row);
+  }
+});
+
+// Ẩn menu khi click ra ngoài
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".msg-actions")) {
+    document.querySelectorAll(".msg .menu").forEach(m => m.classList.add("hidden"));
+  }
+});
+
+// Call APIs
+async function deleteForMe(messageId, rowEl) {
+  try {
+    await API.post(`/api/messages/${messageId}/deleteForMe`, {});
+    rowEl?.remove();                        // xoá khỏi màn hình
+    toast("Đã gỡ ở bạn");
+  } catch (e) {
+    toast(e?.message || "Không thể gỡ ở bạn");
+  }
+}
+
+async function recallMessage(messageId, rowEl) {
+  try {
+    await API.post(`/api/messages/${messageId}/recall`, {});
+    // Cập nhật UI tại chỗ
+    const textEl = rowEl?.querySelector(".bubble .text");
+    if (textEl) textEl.textContent = "Tin nhắn đã được thu hồi";
+    rowEl?.querySelector(".menu")?.classList.add("hidden");
+    toast("Đã thu hồi");
+    // Đồng bộ lại lịch sử/preview
+    await loadConversations();
+  } catch (e) {
+    toast(e?.message || "Không thể thu hồi");
+  }
+}
 
   // ===== BOOT =====
   (async function boot() {
     try {
       await loadMe();
+      ensureSocket();
       await loadFriendsAndCache();
       repaintMessages();
       await loadConversations();
@@ -896,7 +1068,8 @@
 
       renderMessage(show);
       results.push(show);
-      if (io) io.emit("message:new", { ...show, conversationId: currentConv });
+      if (io)
+        socket.emit("message:new", { ...show, conversationId: currentConv });
     }
     pendingFiles = [];
     refreshPreview();
@@ -1382,19 +1555,13 @@
 
       toast(`Đã ${action === "accept" ? "chấp nhận" : "từ chối"} yêu cầu!`);
 
-      // Xóa request khỏi danh sách
       requestItemEl?.remove();
 
-      // Cập nhật lại số lượng (trừ đi 1)
       const currentCount = parseInt(requestCountEl.textContent) || 0;
       requestCountEl.textContent = Math.max(0, currentCount - 1);
 
       if (action === "accept") {
-        // Tải lại danh sách hội thoại nếu cần, hoặc giả lập thêm hội thoại mới
-        // Nếu đây là lần đầu tiên hai người bạn nhau, có thể cần tạo hội thoại
-        // (Backend nên xử lý việc tạo hội thoại nếu chưa có)
-        // Tạm thời, ta chỉ hiển thị toast và làm mới count
-        // loadConversations();
+        await loadConversations();
       }
     } catch (e) {
       toast(e?.message || "Lỗi xử lý yêu cầu");
@@ -1415,12 +1582,11 @@
 
     if (acceptBtn || rejectBtn) {
       const btn = acceptBtn || rejectBtn;
-      // const requestId = btn.dataset.requestId; // <== Dòng cũ: lấy sai ID
-      const fromId = btn.dataset.fromId; // <== Dòng mới: lấy ID người gửi
+      const fromId = btn.dataset.fromId; 
       const action = acceptBtn ? "accept" : "reject";
 
       const requestItemEl = btn.closest(".request-item");
-      handleFriendResponse(fromId, action, requestItemEl); // <== Sửa: truyền fromId
+      handleFriendResponse(fromId, action, requestItemEl);
     }
   });
 

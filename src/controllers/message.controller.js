@@ -60,6 +60,7 @@ export const sendMessage = async (req, res) => {
 
   const msg = await Message.create(payload);
   await Conversation.findByIdAndUpdate(conversationId, {
+    lastMessage: msg._id,   
     lastMessageAt: new Date(),
   });
   
@@ -142,17 +143,29 @@ export const recallMessage = async (req, res) => {
 
   const msg = await Message.findById(id);
   if (!msg) return res.status(404).json({ error: "Không tìm thấy tin nhắn" });
-
   if (String(msg.sender) !== String(me))
-    return res
-      .status(403)
-      .json({ error: "Bạn không thể thu hồi tin của người khác" });
+    return res.status(403).json({ error: "Bạn không thể thu hồi tin của người khác" });
 
   msg.recalled = new Date();
   await msg.save();
 
-  // Cần thêm logic Socket thông báo thu hồi tin nhắn đến người nhận
-  // (Không thực hiện ở đây vì không phải yêu cầu chính, nhưng cần lưu ý)
+  // 🔔 Phát socket cho các client trong phòng
+  if (req.io) {
+    req.io.to(String(msg.conversation)).emit("message:recalled", {
+      messageId: msg._id,
+      conversationId: msg.conversation,
+    });
+  }
+
+  // (tuỳ chọn) đẩy lên sidebar người kia
+  // Tìm hội thoại để gửi "conversation:update"
+  const conv = await Conversation.findById(msg.conversation).select("members");
+  const receiverId = conv?.members?.find((m) => String(m) !== String(me));
+  if (receiverId && req.sendToUser) {
+    req.sendToUser(receiverId, "conversation:update", {
+      conversationId: conv._id,
+    });
+  }
 
   res.json({ ok: true, messageId: msg._id, recalledAt: msg.recalled });
 };

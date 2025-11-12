@@ -31,9 +31,12 @@ export const createOrGetPrivate = async (req, res) => {
         conversationId: conv._id,
         conv: conv,
       });
+      req.sendToUser(me, "conversation:new", {
+        conversationId: conv._id,
+        conv,
+      });
     }
   }
- 
 
   res.json(conv);
 };
@@ -192,11 +195,9 @@ export const leaveGroup = async (req, res) => {
     return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
   if (toStr(conv.owner) === toStr(me)) {
-    return res
-      .status(400)
-      .json({
-        error: "Owner không thể rời nhóm, hãy chuyển quyền hoặc xoá nhóm",
-      });
+    return res.status(400).json({
+      error: "Owner không thể rời nhóm, hãy chuyển quyền hoặc xoá nhóm",
+    });
   }
 
   await Conversation.updateOne({ _id: id }, { $pull: { members: me } });
