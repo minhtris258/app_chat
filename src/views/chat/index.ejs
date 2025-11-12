@@ -8,7 +8,8 @@
   <aside class="sidebar">
     <div class="sidebar-top">
       <div class="brand">Talky</div>
-      <div class="search"><input id="searchInput" placeholder="Tìm kiếm" /></div>
+     <button id="requestsBtn" class="btn outline small">🔔 Yêu cầu KB (<span id="requestCount">0</span>)</button>
+      <button id="searchFriendBtn" class="btn outline small">🔎 Tìm bạn</button>
     </div>
 
     <div class="me-card" id="meCard">
@@ -28,8 +29,7 @@
     <ul class="conv-list" id="convList"></ul>
 
 <div class="sidebar-footer">
-      <button id="requestsBtn" class="btn outline small">🔔 Yêu cầu KB (<span id="requestCount">0</span>)</button>
-      <button id="searchFriendBtn" class="btn outline small">🔎 Tìm bạn</button>
+      
       <button id="newGroupBtn" class="btn outline small">+ Tạo nhóm</button>
       <button id="logoutBtn" class="btn danger small">Đăng xuất</button>
     </div>
@@ -101,6 +101,21 @@
     </div>
   </div>
 </div>
+
+<!-- ==== Modal Cài đặt Chat Cá nhân (Huỷ kết bạn / Chặn) ==== -->
+<div id="directSettingsModal" class="modal hidden">
+  <div class="modal-content">
+    <h3>Cài đặt bạn bè</h3>
+    <div class="settings-section">
+      <button class="btn outline danger" id="unfriendBtn">❌ Huỷ kết bạn</button>
+      <button class="btn outline danger" id="blockBtn">🚫 Chặn người dùng</button>
+    </div>
+    <div class="actions">
+      <button class="btn" id="closeDirectSettingsBtn">Đóng</button>
+    </div>
+  </div>
+</div>
+
 <div id="friendSearchModal" class="modal hidden">
   <div class="modal-content">
     <h3>Tìm kiếm Bạn bè</h3>
@@ -127,6 +142,32 @@
     </div>
   </div>
 </div>
+</div>
+<!-- ==== MODAL: Thêm thành viên vào nhóm ==== -->
+<div id="addMemberModal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Thêm thành viên vào nhóm</h3>
+    <div id="addMemberUserList" class="user-list" style="max-height:300px;overflow-y:auto;padding:8px;">
+      <div style="padding:10px;">Đang tải danh sách...</div>
+    </div>
+    <div class="actions" style="margin-top:12px;text-align:right;">
+      <button class="btn outline" id="cancelAddMemberBtn">Hủy</button>
+      <button class="btn primary" id="confirmAddMemberBtn">Thêm</button>
+    </div>
+  </div>
+</div>
+<!-- ==== MODAL: Xoá thành viên khỏi nhóm ==== -->
+<div id="removeMemberModal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Xoá thành viên</h3>
+    <div id="removeMemberUserList" class="user-list" style="max-height:320px;overflow-y:auto;padding:8px;">
+      <div style="padding:10px">Đang tải danh sách thành viên...</div>
+    </div>
+    <div class="actions" style="margin-top:12px;text-align:right;">
+      <button class="btn outline" id="cancelRemoveMemberBtn">Hủy</button>
+      <button class="btn danger" id="confirmRemoveMemberBtn">Xoá</button>
+    </div>
+  </div>
 </div>
 
 <%

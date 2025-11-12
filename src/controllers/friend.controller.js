@@ -159,12 +159,30 @@ export const unfriend = async (req, res) => {
     const userId = req.user.id;
     const { friendId } = req.body;
 
+    if (!friendId) {
+      return res.status(400).json({ message: "Thiếu friendId" });
+    }
+
+    // 1) Gỡ bạn trong cả 2 user
     await User.updateOne({ _id: userId }, { $pull: { friends: friendId } });
     await User.updateOne({ _id: friendId }, { $pull: { friends: userId } });
 
-    res.status(200).json({ message: "Đã hủy kết bạn" });
+    // 2) Xoá mọi request liên quan giữa 2 user (cả 2 chiều)
+    // Giả sử bạn có model FriendRequest với fields: from, to, status, ...
+    await FriendRequest.deleteMany({
+      $or: [
+        { from: userId, to: friendId },
+        { from: friendId, to: userId },
+      ],
+    });
+
+    // 3) (Tuỳ chọn) nếu bạn lưu các mảng khác (ví dụ pendingRequests) trong User,
+    // có thể cần pull thêm ở đây.
+
+    return res.status(200).json({ message: "Đã huỷ kết bạn và xoá yêu cầu liên quan" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("unfriend error:", error);
+    return res.status(500).json({ message: error.message || "Lỗi server" });
   }
 };
 

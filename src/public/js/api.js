@@ -22,18 +22,14 @@
   }
 
   async function parseResponse(res) {
-    // 204 No Content
     if (res.status === 204) return null;
-
     const ct = res.headers.get("content-type") || "";
     let data = null, text = null;
-
     if (ct.includes("application/json")) {
       try { data = await res.json(); } catch (_) {}
     } else {
       try { text = await res.text(); } catch (_) {}
     }
-
     if (!res.ok) {
       const msg =
         (data && (data.message || data.error || data.msg)) ||
@@ -50,11 +46,9 @@
   async function _fetch(path, { method = "GET", body, isForm = false, headers } = {}) {
     const opts = {
       method,
-      credentials: "include", // gửi cookie nếu backend dùng cookie httpOnly
+      credentials: "include",
       headers: buildHeaders({ isForm, extra: headers }),
-      body: body
-        ? (isForm ? body : JSON.stringify(body))
-        : undefined,
+      body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
     };
     const res = await fetch(API_BASE + path, opts);
     return parseResponse(res);
@@ -63,7 +57,6 @@
   const API = {
     getToken, setToken,
 
-    // gọi xong login/register -> truyền response vào đây để tự lưu token nếu có
     captureAuth(resp) {
       const token =
         resp?.token ||
@@ -75,36 +68,24 @@
       return resp;
     },
 
-    async get(url, headers) {
-      return _fetch(url, { method: "GET", headers });
-    },
+    async get(url, headers) { return _fetch(url, { method: "GET", headers }); },
+    async post(url, body, headers) { return _fetch(url, { method: "POST", body, headers }); },
+    async put(url, body, headers) { return _fetch(url, { method: "PUT", body, headers }); },
+    async patch(url, body, headers) { return _fetch(url, { method: "PATCH", body, headers }); },
+    async del(url, headers) { return _fetch(url, { method: "DELETE", headers }); },
+    async delete(url, headers) { return _fetch(url, { method: "DELETE", headers }); },
 
-    async post(url, body, headers) {
-      return _fetch(url, { method: "POST", body, headers });
-    },
-
-    async put(url, body, headers) {
-      return _fetch(url, { method: "PUT", body, headers });
-    },
-
-    async del(url, headers) {
-      return _fetch(url, { method: "DELETE", headers });
-    },
-
-    // multipart upload
     async upload(url, formData, headers) {
-      // KHÔNG set Content-Type cho FormData (trình duyệt tự set boundary)
       return _fetch(url, { method: "POST", body: formData, isForm: true, headers });
     },
 
-    // tiện cho socket.io: io(API.socketAuth())
     socketAuth() {
       const tok = getToken();
       return tok ? { withCredentials: true, auth: { token: tok } } : { withCredentials: true };
     }
   };
 
-  // mini toast
+  // mini toast (keeps existing behavior)
   window.toast = (msg) => {
     const el = document.getElementById("toast");
     if (!el) return alert(msg);

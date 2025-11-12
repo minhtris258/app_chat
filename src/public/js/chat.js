@@ -169,125 +169,123 @@
     });
   }
 
-function renderMessage(m) {
-  if (!messagesEl) return;
-  const sender = (getSenderId(m) || "") + "";
-  const created = m.createdAt || m.created_at || Date.now();
-  const mine = String(sender) === String(ME_ID);
+  function renderMessage(m) {
+    if (!messagesEl) return;
+    const sender = (getSenderId(m) || "") + "";
+    const created = m.createdAt || m.created_at || Date.now();
+    const mine = String(sender) === String(ME_ID);
 
-  const msgId = m._id || m.id || null;
+    const msgId = m._id || m.id || null;
 
-  let type = m.type;
-  if (!type && typeof m.text === "string" && isOnlyEmoji(m.text)) type = "emoji";
+    let type = m.type;
+    if (!type && typeof m.text === "string" && isOnlyEmoji(m.text)) type = "emoji";
 
-  const row = document.createElement("div");
-  row.className = "msg " + (mine ? "me" : "other");
-  row.dataset.sender = sender;
-  if (msgId) row.dataset.id = msgId;
+    const row = document.createElement("div");
+    row.className = "msg " + (mine ? "me" : "other");
+    row.dataset.sender = sender;
+    if (msgId) row.dataset.id = msgId;
 
-  // === Avatar trái cho đối phương ===
-  if (!mine) {
-    let initial = "🙂";
-    const ava = document.createElement("div");
-    ava.className = "avatar small";
-    if (m.sender && typeof m.sender === "object") {
-      initial = getInitial(m.sender);
-      const sid = String(m.sender._id || m.sender.id || sender);
-      if (sid) USER_CACHE.set(sid, m.sender);
-    } else {
-      const cached = USER_CACHE.get(String(sender));
-      if (cached) {
-        initial = getInitial(cached);
-      } else if (sender) {
+    // === Avatar trái cho đối phương ===
+    if (!mine) {
+      let initial = "🙂";
+      const ava = document.createElement("div");
+      ava.className = "avatar small";
+      if (m.sender && typeof m.sender === "object") {
+        initial = getInitial(m.sender);
+        const sid = String(m.sender._id || m.sender.id || sender);
+        if (sid) USER_CACHE.set(sid, m.sender);
+      } else {
+        const cached = USER_CACHE.get(String(sender));
+        if (cached) {
+          initial = getInitial(cached);
+        } else if (sender) {
+          (async () => {
+            try {
+              const u = await fetchUserById(sender);
+              if (u) {
+                USER_CACHE.set(String(sender), u);
+                ava.textContent = getInitial(u);
+              }
+            } catch {}
+          })();
+        }
+      }
+      ava.textContent = initial;
+      row.appendChild(ava);
+    }
+
+    // === Cột phải: tên (nếu group & other) + bubble ===
+    const stack = document.createElement("div");
+    stack.className = "stack";
+
+    if (currentConvIsGroup && !mine) {
+      let displayName = getDisplayNameFromMessage(m, sender);
+      if (!displayName && sender) {
         (async () => {
           try {
             const u = await fetchUserById(sender);
             if (u) {
               USER_CACHE.set(String(sender), u);
-              ava.textContent = getInitial(u);
+              const nameNode = stack.querySelector(".sender-name");
+              if (nameNode) nameNode.textContent = getDisplayNameFromUser(u);
             }
           } catch {}
         })();
       }
+      const nameEl = document.createElement("div");
+      nameEl.className = "sender-name";
+      nameEl.textContent = displayName || "Đang tải...";
+      stack.appendChild(nameEl);
     }
-    ava.textContent = initial;
-    row.appendChild(ava);
-  }
 
-  // === Cột phải: tên (nếu group & other) + bubble ===
-  const stack = document.createElement("div");
-  stack.className = "stack";
+    // === Bubble ===
+    const bubble = document.createElement("div");
+    bubble.className = "bubble" + (type === "emoji" ? " emoji" : "") + (type === "image" ? " image" : "");
 
-  if (currentConvIsGroup && !mine) {
-    let displayName = getDisplayNameFromMessage(m, sender);
-    if (!displayName && sender) {
-      (async () => {
-        try {
-          const u = await fetchUserById(sender);
-          if (u) {
-            USER_CACHE.set(String(sender), u);
-            const nameNode = stack.querySelector(".sender-name");
-            if (nameNode) nameNode.textContent = getDisplayNameFromUser(u);
-          }
-        } catch {}
-      })();
+    if (type === "image" || m.type === "image") {
+      const src = m.image || m.url || m.imageUrl || m.contentUrl || "";
+      bubble.innerHTML = `
+        <img class="image" src="${src}" alt="image">
+        <div class="meta">${fmtTime(created)}</div>`;
+    } else if (type === "emoji") {
+      const emoji = m.emoji || m.text || "";
+      bubble.innerHTML = `
+        <div class="emoji-big">${emoji}</div>
+        <div class="meta">${fmtTime(created)}</div>`;
+    } else {
+      const text = (m.recalled ? "Tin nhắn đã được thu hồi" : (m.text || ""));
+      bubble.innerHTML = `
+        <div class="text">${text}</div>
+        <div class="meta">${fmtTime(created)}</div>`;
     }
-    const nameEl = document.createElement("div");
-    nameEl.className = "sender-name";
-    nameEl.textContent = displayName || "Đang tải...";
-    stack.appendChild(nameEl);
+
+    // === Ba chấm + menu ===
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
+    actions.innerHTML = `
+      <button class="kebab" ${msgId ? "" : "disabled"} title="Hành động">⋯</button>
+      <div class="menu hidden">
+        <button class="act-delete-me">Gỡ ở bạn</button>
+        ${mine ? `<button class="act-recall">Thu hồi mọi người</button>` : ""}
+      </div>`;
+
+    stack.appendChild(bubble);
+
+    // .me: actions trước bubble ; .other: actions sau bubble
+    if (mine) {
+      row.appendChild(actions);  // trước
+      row.appendChild(stack);
+    } else {
+      row.appendChild(stack);
+      row.appendChild(actions);  // sau
+    }
+
+    messagesEl.appendChild(row);
+
+    const t = +new Date(created);
+    if (!Number.isNaN(t)) lastMsgAt = Math.max(lastMsgAt, t);
+    scrollToBottom();
   }
-
-  // === Bubble ===
-  const bubble = document.createElement("div");
-  bubble.className = "bubble" + (type === "emoji" ? " emoji" : "") + (type === "image" ? " image" : "");
-
-  if (type === "image" || m.type === "image") {
-    const src = m.image || m.url || m.imageUrl || m.contentUrl || "";
-    bubble.innerHTML = `
-      <img class="image" src="${src}" alt="image">
-      <div class="meta">${fmtTime(created)}</div>`;
-  } else if (type === "emoji") {
-    const emoji = m.emoji || m.text || "";
-    bubble.innerHTML = `
-      <div class="emoji-big">${emoji}</div>
-      <div class="meta">${fmtTime(created)}</div>`;
-  } else {
-    const text = (m.recalled ? "Tin nhắn đã được thu hồi" : (m.text || ""));
-    bubble.innerHTML = `
-      <div class="text">${text}</div>
-      <div class="meta">${fmtTime(created)}</div>`;
-  }
-
-  // === Ba chấm + menu ===
-  const actions = document.createElement("div");
-  actions.className = "msg-actions";
-  actions.innerHTML = `
-    <button class="kebab" ${msgId ? "" : "disabled"} title="Hành động">⋯</button>
-    <div class="menu hidden">
-      <button class="act-delete-me">Gỡ ở bạn</button>
-      ${mine ? `<button class="act-recall">Thu hồi mọi người</button>` : ""}
-    </div>`;
-
- stack.appendChild(bubble);
-
-// .me: actions trước bubble ; .other: actions sau bubble
-if (mine) {
-  row.appendChild(actions);  // trước
-  row.appendChild(stack);
-} else {
-  row.appendChild(stack);
-  row.appendChild(actions);  // sau
-}
-
-messagesEl.appendChild(row);
-
-  const t = +new Date(created);
-  if (!Number.isNaN(t)) lastMsgAt = Math.max(lastMsgAt, t);
-  scrollToBottom();
-}
-
-
 
   function renderDateBadge(label) {
     if (!messagesEl) return;
@@ -302,10 +300,8 @@ messagesEl.appendChild(row);
   async function fetchUserById(id) {
     if (!id) return null;
     const candidates = [
-      `/api/users/${id}`,
       `/api/user/${id}`,
-      `/api/user/detail/${id}`,
-      `/api/users?id=${id}`, // nếu server trả {items:[...]}
+     
     ];
     for (const url of candidates) {
       try {
@@ -351,6 +347,62 @@ messagesEl.appendChild(row);
     if (peer && typeof peer === "object") return pickName(peer);
     return conv?.peerName || conv?.name || "Không tên";
   }
+// ---------- Sidebar realtime helpers ----------
+function previewFromMsg(m) {
+  if (!m) return "";
+  if (m.type === "image" || m.image || m.url) return "[Ảnh]";
+  if (m.type === "emoji" || m.emoji) return String(m.emoji || m.text || "");
+  return String(m.text || "");
+}
+
+function upsertConversation(convPartial) {
+  if (!convPartial) return;
+  const id = convPartial._id || convPartial.id;
+  if (!id) return;
+
+  const idx = CONV_CACHE.findIndex((c) => String(c._id || c.id) === String(id));
+  if (idx >= 0) {
+    const existing = CONV_CACHE[idx];
+    const merged = { ...existing, ...convPartial };
+
+    // ensure lastMessage / updatedAt preserved if provided
+    if (convPartial.lastMessage) merged.lastMessage = convPartial.lastMessage;
+    if (convPartial.updatedAt) merged.updatedAt = convPartial.updatedAt;
+
+    // move to front
+    CONV_CACHE.splice(idx, 1);
+    CONV_CACHE.unshift(merged);
+  } else {
+    const toInsert = { _id: id, ...convPartial };
+    CONV_CACHE.unshift(toInsert);
+  }
+
+  // re-render sidebar according to current filter
+  renderConvList();
+
+  // preserve active highlight
+  [...(convList?.children || [])].forEach((li) => {
+    li.classList.toggle("active", li.dataset.id === String(currentConv));
+  });
+}
+
+/**
+ * Gọi khi có message mới (gửi từ ai đó hoặc nhận)
+ * m có thể chứa conversationId/conversation/convId/roomId
+ */
+function onMessageForSidebar(m) {
+  if (!m) return;
+  const convId = (m.conversationId || m.conversation || m.convId || m.roomId) + "";
+  const preview = previewFromMsg(m);
+  const updatedAt = m.createdAt || m.created_at || new Date().toISOString();
+
+  upsertConversation({
+    _id: convId,
+    lastMessage: { text: preview, createdAt: updatedAt },
+    updatedAt,
+  });
+}
+// ---------- end helpers ----------
 
   // ===== DATA =====
   async function loadMe() {
@@ -377,10 +429,8 @@ messagesEl.appendChild(row);
     meReadyResolve && meReadyResolve();
   }
   async function loadFriendsAndCache() {
-    // <== THÊM HÀM MỚI
     FRIEND_IDS.clear();
     try {
-      // API: GET /api/friends/friends (có sẵn)
       const friends = await API.get("/api/friends/friends");
       if (Array.isArray(friends)) {
         friends.forEach((f) => {
@@ -392,64 +442,74 @@ messagesEl.appendChild(row);
       console.warn("Could not load friends list:", e);
     }
   }
-  
-  async function loadConversations() {
-    if (!convList) return;
-    convList.innerHTML = "";
+
+ async function loadConversations() {
+  if (!convList) return;
+
+  try {
     const data = await API.get("/api/conversations");
     const list = data?.items || data?.conversations || data || [];
 
-    list.forEach((c) => {
-      const convId = c._id || c.id;
+    // cache toàn bộ để render theo filter
+    CONV_CACHE = Array.isArray(list) ? list.slice() : [];
+
+    // sort by updatedAt desc (fallback to lastMessage.createdAt)
+    CONV_CACHE.sort((a, b) => {
+      const ta = new Date(a.updatedAt || a.lastMessage?.createdAt || 0).getTime();
+      const tb = new Date(b.updatedAt || b.lastMessage?.createdAt || 0).getTime();
+      if (tb !== ta) return tb - ta;
+      // tie-breaker by id string
+      const ida = String(a._id || a.id || "");
+      const idb = String(b._id || b.id || "");
+      return idb.localeCompare(ida);
+    });
+
+    // Render sidebar using existing renderer (keeps filtering logic)
+    renderConvList();
+
+    // Warm-up USER_CACHE for peer objects so titles/avatars can be updated quickly
+    CONV_CACHE.forEach((c) => {
       const peerRaw = getPeer(c, ME_ID);
-      if (peerRaw && typeof peerRaw === "object") {
-        const pid = String(normalizeId(peerRaw));
-        if (pid) USER_CACHE.set(pid, peerRaw);
-      }
       const peerId = normalizeId(peerRaw);
-      const title = getConversationTitle(c, ME_ID);
-
-      const li = document.createElement("li");
-      li.dataset.id = convId;
-      if (peerId) li.dataset.user = peerId;
-
-      const avaChar =
-        c.type === "group"
-          ? "👥"
-          : typeof peerRaw === "object"
-          ? pickAvatar(peerRaw)
-          : c.peerName?.[0]?.toUpperCase() || "👤";
-
-      const last = c.lastMessage?.text || c.last?.text || c.preview?.text || "";
-      const updated =
-        c.updatedAt || c.lastMessage?.createdAt || c.last?.createdAt;
-
-      li.innerHTML = `
-        <div class="avatar">${avaChar}</div>
-        <div class="col">
-          <div class="title">${title}</div>
-          <div class="last">${last}</div>
-        </div>
-        <div class="time">${updated ? fmtTime(updated) : ""}</div>
-        <div class="status">⚫</div>
-      `;
-      li.addEventListener("click", () => openConversation(convId, c));
-      convList.appendChild(li);
-
-      // nếu chưa có tên (peer là ID) -> fetch user rồi cập nhật
-      if (title === "Không tên" && peerId) {
-        (async () => {
-          const u = await fetchUserById(peerId);
-          if (!u) return;
-          const row = convList.querySelector(`li[data-id="${convId}"]`);
-          if (!row) return;
-          row.querySelector(".title").textContent = pickName(u);
-          row.querySelector(".avatar").textContent = pickAvatar(u);
-          row.dataset.user = u._id || peerId;
-        })();
+      if (peerRaw && typeof peerRaw === "object" && peerId) {
+        USER_CACHE.set(String(peerId), peerRaw);
       }
     });
+
+    // For conversations with missing title (peer is id), fetch user and update the DOM
+    CONV_CACHE.forEach(async (c) => {
+      const convId = c._id || c.id;
+      const peerRaw = getPeer(c, ME_ID);
+      const peerId = normalizeId(peerRaw);
+
+      const title = getConversationTitle(c, ME_ID);
+      if (title === "Không tên" && peerId) {
+        try {
+          const u = await fetchUserById(peerId);
+          if (!u) return;
+          // update cached user and DOM row if present
+          USER_CACHE.set(String(peerId), u);
+          const row = convList.querySelector(`li[data-id="${convId}"]`);
+          if (!row) return;
+          const titleEl = row.querySelector(".title");
+          const avaEl = row.querySelector(".avatar");
+          if (titleEl) titleEl.textContent = pickName(u);
+          if (avaEl) avaEl.textContent = pickAvatar(u);
+          row.dataset.user = u._id || peerId;
+        } catch (err) {
+          // ignore per-item failures
+          console.warn("fetchUserById for conv", convId, err);
+        }
+      }
+    });
+  } catch (err) {
+    console.error("loadConversations error:", err);
+    // keep existing UI but notify user
+    convList.innerHTML = `<div style="padding:10px;color:red">Không tải được danh sách cuộc trò chuyện.</div>`;
   }
+}
+
+
   function renderConvList() {
     if (!convList) return;
     convList.innerHTML = "";
@@ -520,6 +580,22 @@ messagesEl.appendChild(row);
     });
   }
 
+  // ====== BỘ LỌC CUỘC TRÒ CHUYỆN (tabs) ======
+  tabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      // Bỏ active cũ
+      tabs.forEach(t => t.classList.remove("active"));
+      // Đánh dấu tab hiện tại
+      tab.classList.add("active");
+
+      // Cập nhật biến filter
+      CURRENT_FILTER = tab.dataset.tab || "all";
+
+      // Render lại danh sách theo bộ lọc
+      renderConvList();
+    });
+  });
+
   // ===== SOCKET =====
   function ensureSocket() {
     if (socket) return;
@@ -538,28 +614,29 @@ messagesEl.appendChild(row);
     const onIncoming = (m) => {
       const convId =
         (m.conversationId || m.conversation || m.convId || m.roomId) + "";
-      if (String(convId) === String(currentConv)) renderMessage({ ...m });
+
+      // CẬP NHẬT SIDEBAR CHO TẤT CẢ TRƯỜNG HỢP (bên kia gửi hoặc server thông báo)
+      try { onMessageForSidebar(m); } catch (e) { console.warn("sidebar update err:", e); }
+
+      if (String(convId) === String(currentConv)) {
+        renderMessage({ ...m });
+      } else {
+        // Nếu không phải convo đang mở: toast + sidebar đã được update
+        toast(`Tin nhắn mới từ ${getDisplayNameFromMessage(m, getSenderId(m))}`);
+      }
     };
     socket.on("message:new", onIncoming);
     socket.on("message:created", onIncoming);
     socket.on("chat:message", onIncoming);
     socket.on("message", onIncoming);
 
-    // Xử lý tin nhắn đến từ cuộc hội thoại CHƯA ĐƯỢC MỞ (Global event) <== THÊM MỚI
+    // notification:message cũng cập nhật
     socket.on("notification:message", (m) => {
-      const convId = m.conversationId || m.conversation || m.convId;
-      if (String(convId) === String(currentConv)) {
-        // Nếu đã mở, chỉ render (sự kiện onIncoming đã xử lý)
-        renderMessage({ ...m });
-      } else {
-        // Nếu chưa mở: Chỉ cần tải lại danh sách hội thoại để cập nhật preview.
-        // loadConversations() sẽ tự cập nhật sidebar và tên người gửi.
-        loadConversations();
-        toast(
-          `Tin nhắn mới từ ${getDisplayNameFromMessage(m, getSenderId(m))}`
-        );
-      }
+      try { onMessageForSidebar(m); } catch (e) { console.warn(e); }
+      // choose whether to toast
+      toast(`Tin nhắn mới từ ${getDisplayNameFromMessage(m, getSenderId(m))}`);
     });
+
 
     socket.on("typing", ({ conversationId, userId, isTyping }) => {
       if (String(conversationId) !== String(currentConv)) return;
@@ -578,16 +655,14 @@ messagesEl.appendChild(row);
 
     socket.on("conversation:created", () => loadConversations());
 
-    // THÊM LISTENER MỚI để cập nhật danh sách hội thoại global
     const onConvUpdate = () => {
       console.log("Cập nhật danh sách hội thoại do sự kiện socket");
       loadConversations();
     };
 
-    socket.on("conversation:update", onConvUpdate); // Lắng nghe sự kiện từ server
+    socket.on("conversation:update", onConvUpdate);
     socket.on("conversation:new", onConvUpdate);
 
-    // online / offline
     socket.on("user:status", ({ userId, online }) => {
       if (
         currentPeer &&
@@ -601,18 +676,17 @@ messagesEl.appendChild(row);
       );
       if (dot) dot.textContent = online ? "🟢" : "⚫";
     });
+
     socket.on("message:recalled", ({ messageId }) => {
-  const row = messagesEl?.querySelector(`.msg[data-id="${messageId}"]`);
-  if (row) {
-    const textEl = row.querySelector(".bubble .text");
-    if (textEl) textEl.textContent = "Tin nhắn đã được thu hồi";
-    // Ẩn menu nếu đang mở
-    row.querySelector(".menu")?.classList.add("hidden");
-  } else {
-    // Nếu đang ở phòng khác thì làm mới sidebar để update preview
-    loadConversations();
-  }
-});
+      const row = messagesEl?.querySelector(`.msg[data-id="${messageId}"]`);
+      if (row) {
+        const textEl = row.querySelector(".bubble .text");
+        if (textEl) textEl.textContent = "Tin nhắn đã được thu hồi";
+        row.querySelector(".menu")?.classList.add("hidden");
+      } else {
+        loadConversations();
+      }
+    });
   }
 
   // ===== POLLING (fallback) =====
@@ -806,7 +880,8 @@ messagesEl.appendChild(row);
                 ...(isEmoji ? baseEmoji : baseText),
                 createdAt: new Date().toISOString(),
               };
-        renderMessage(show);
+         renderMessage(show);
+        try { onMessageForSidebar(show); } catch (e) { console.warn(e); }
         if (socket)
           socket.emit("message:new", { ...show, conversationId: currentConv });
         forceTypingStop();
@@ -862,67 +937,68 @@ messagesEl.appendChild(row);
     API.setToken(null);
     location.href = "/login";
   });
-// Toggle menu ba chấm
-messagesEl?.addEventListener("click", (e) => {
-  const kebab = e.target.closest(".kebab");
-  const row = e.target.closest(".msg");
-  if (kebab && row) {
-    const menu = row.querySelector(".menu");
-    document.querySelectorAll(".msg .menu").forEach(m => m.classList.add("hidden"));
-    menu?.classList.toggle("hidden");
-  }
 
-  // Gỡ ở bạn
-  const delBtn = e.target.closest(".act-delete-me");
-  if (delBtn) {
+  // Toggle menu ba chấm
+  messagesEl?.addEventListener("click", (e) => {
+    const kebab = e.target.closest(".kebab");
     const row = e.target.closest(".msg");
-    const id = row?.dataset.id;
-    if (!id) return toast("Tin vừa gửi chưa có ID—thử lại sau.");
-    deleteForMe(id, row);
+    if (kebab && row) {
+      const menu = row.querySelector(".menu");
+      document.querySelectorAll(".msg .menu").forEach(m => m.classList.add("hidden"));
+      menu?.classList.toggle("hidden");
+    }
+
+    // Gỡ ở bạn
+    const delBtn = e.target.closest(".act-delete-me");
+    if (delBtn) {
+      const row = e.target.closest(".msg");
+      const id = row?.dataset.id;
+      if (!id) return toast("Tin vừa gửi chưa có ID—thử lại sau.");
+      deleteForMe(id, row);
+    }
+
+    // Thu hồi mọi người (chỉ hiện với tin của mình)
+    const recallBtn = e.target.closest(".act-recall");
+    if (recallBtn) {
+      const row = e.target.closest(".msg");
+      const id = row?.dataset.id;
+      if (!id) return toast("Tin vừa gửi chưa có ID—thử lại sau.");
+      recallMessage(id, row);
+    }
+  });
+
+  // Ẩn menu khi click ra ngoài
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".msg-actions")) {
+      document.querySelectorAll(".msg .menu").forEach(m => m.classList.add("hidden"));
+    }
+  });
+
+  // Call APIs
+  async function deleteForMe(messageId, rowEl) {
+    try {
+      await API.post(`/api/messages/${messageId}/deleteForMe`, {});
+      rowEl?.remove();                        // xoá khỏi màn hình
+      toast("Đã gỡ ở bạn");
+    } catch (e) {
+      toast(e?.message || "Không thể gỡ ở bạn");
+    }
   }
 
-  // Thu hồi mọi người (chỉ hiện với tin của mình)
-  const recallBtn = e.target.closest(".act-recall");
-  if (recallBtn) {
-    const row = e.target.closest(".msg");
-    const id = row?.dataset.id;
-    if (!id) return toast("Tin vừa gửi chưa có ID—thử lại sau.");
-    recallMessage(id, row);
+  async function recallMessage(messageId, rowEl) {
+    try {
+      await API.post(`/api/messages/${messageId}/recall`, {});
+      // Cập nhật UI tại chỗ
+      const textEl = rowEl?.querySelector(".bubble .text");
+      if (textEl) textEl.textContent = "Tin nhắn đã được thu hồi";
+      rowEl?.querySelector(".menu")?.classList.add("hidden");
+      toast("Đã thu hồi");
+      // Đồng bộ lại lịch sử/preview
+      await loadConversations();
+    } catch (e) {
+      toast(e?.message || "Không thể thu hồi");
+    }
   }
-});
-
-// Ẩn menu khi click ra ngoài
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".msg-actions")) {
-    document.querySelectorAll(".msg .menu").forEach(m => m.classList.add("hidden"));
-  }
-});
-
-// Call APIs
-async function deleteForMe(messageId, rowEl) {
-  try {
-    await API.post(`/api/messages/${messageId}/deleteForMe`, {});
-    rowEl?.remove();                        // xoá khỏi màn hình
-    toast("Đã gỡ ở bạn");
-  } catch (e) {
-    toast(e?.message || "Không thể gỡ ở bạn");
-  }
-}
-
-async function recallMessage(messageId, rowEl) {
-  try {
-    await API.post(`/api/messages/${messageId}/recall`, {});
-    // Cập nhật UI tại chỗ
-    const textEl = rowEl?.querySelector(".bubble .text");
-    if (textEl) textEl.textContent = "Tin nhắn đã được thu hồi";
-    rowEl?.querySelector(".menu")?.classList.add("hidden");
-    toast("Đã thu hồi");
-    // Đồng bộ lại lịch sử/preview
-    await loadConversations();
-  } catch (e) {
-    toast(e?.message || "Không thể thu hồi");
-  }
-}
 
   // ===== BOOT =====
   (async function boot() {
@@ -932,7 +1008,7 @@ async function recallMessage(messageId, rowEl) {
       await loadFriendsAndCache();
       repaintMessages();
       await loadConversations();
-      await loadFriendRequests(); // <== ĐÃ SỬA: Kích hoạt tải yêu cầu khi khởi động
+      await loadFriendRequests();
     } catch (err) {
       console.warn(err);
       location.href = "/login";
@@ -1077,59 +1153,299 @@ async function recallMessage(messageId, rowEl) {
   }
 
   // ========== NHÓM: GỌI API & luồng thao tác ==========
-  // - POST   /api/conversations/group           -> tạo nhóm {name, members[]}
-  // - PATCH  /api/conversations/:id/name        -> đổi tên nhóm {name}
-  // - POST   /api/conversations/:id/members     -> thêm thành viên {members:[]}
-  // - DELETE /api/conversations/:id/members/:u  -> xoá 1 thành viên
-  // - POST   /api/conversations/:id/leave       -> rời nhóm
-  // - GET    /api/conversations                 -> list hội thoại
+async function renameGroupFlow() {
+  if (!currentConv) {
+    toast("Chọn cuộc trò chuyện trước đã");
+    return;
+  }
 
-  async function renameGroupFlow() {
-    if (!currentConv) return;
-    const name = (prompt("Tên nhóm mới:") || "").trim();
-    if (!name) return;
-    try {
+  const name = (prompt("Tên nhóm mới:") || "").trim();
+  if (!name) return;
+
+  toast("Đang đổi tên...");
+
+  try {
+    // Nếu API.patch tồn tại thì dùng, ngược lại fallback về fetch trực tiếp
+    if (window.API && typeof window.API.patch === "function") {
       await API.patch(`/api/conversations/${currentConv}/name`, { name });
-      peerNameEl.textContent = name;
-      const row = document.querySelector(
-        `.conv-list li[data-id="${currentConv}"] .title`
-      );
-      if (row) row.textContent = name;
-      toast("Đã đổi tên nhóm");
-    } catch (e) {
+    } else {
+      // fallback: lấy token nếu có
+      const token = localStorage.getItem("TOKEN");
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+
+      const resp = await fetch(`/api/conversations/${currentConv}/name`, {
+        method: "PATCH",
+        headers,
+        credentials: "include", // nếu bạn dùng cookie-based auth
+        body: JSON.stringify({ name }),
+      });
+
+      if (!resp.ok) {
+        let txt = await resp.text().catch(() => "");
+        let json;
+        try { json = txt ? JSON.parse(txt) : null; } catch {}
+        const msg = (json && (json.message || json.error)) || txt || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+    }
+
+    // Thành công -> cập nhật UI
+    peerNameEl.textContent = name;
+    const row = document.querySelector(`.conv-list li[data-id="${currentConv}"] .title`);
+    if (row) row.textContent = name;
+    toast("Đã đổi tên nhóm");
+  } catch (e) {
+    console.error("renameGroup error:", e);
+    if (String(e?.message || "").includes("401")) {
+      toast("Bạn chưa đăng nhập — vui lòng đăng nhập rồi thử lại.");
+    } else {
       toast(e?.message || "Đổi tên thất bại");
     }
   }
+}
 
-  async function addMembersFlow() {
-    if (!currentConv) return;
-    const raw = (prompt("Nhập userId cần thêm (cách nhau dấu phẩy):") || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!raw.length) return;
 
-    try {
-      await API.post(`/api/conversations/${currentConv}/members`, {
-        userIds: raw,
-      });
-      toast("Đã thêm thành viên");
-    } catch (e) {
-      toast(e?.message || "Thêm thành viên thất bại");
-    }
+ // ====== Thêm thành viên bằng modal chọn ======
+const addMemberModal = document.getElementById("addMemberModal");
+const addMemberUserList = document.getElementById("addMemberUserList");
+const cancelAddMemberBtn = document.getElementById("cancelAddMemberBtn");
+const confirmAddMemberBtn = document.getElementById("confirmAddMemberBtn");
+
+async function addMembersFlow() {
+  if (!currentConv) return toast("Chưa chọn nhóm");
+  if (!addMemberModal) return toast("Không tìm thấy modal thêm thành viên");
+
+  // Hiện modal
+  addMemberModal.classList.remove("hidden");
+  addMemberUserList.innerHTML = `<div style='padding:10px'>Đang tải danh sách...</div>`;
+
+ // inside addMembersFlow() — replace the part that fills addMemberUserList.innerHTML
+try {
+  const res = await API.get("/api/user/list");
+  const list = res?.items || res?.users || res || [];
+
+  // Lấy chi tiết convo để biết ai đang là member (có thể là id hoặc object)
+  let convDetail = null;
+  try {
+    convDetail = await API.get(`/api/conversations/${currentConv}`);
+  } catch (err) {
+    // ignore, vẫn tiếp tục với danh sách toàn bộ user
+    convDetail = null;
   }
 
-  async function removeMemberFlow() {
-    if (!currentConv) return;
+  // Chuẩn hoá memberIds -> Set chuỗi
+  const memberIdsSet = new Set();
+  (convDetail?.members || []).forEach((m) => {
+    if (!m) return;
+    const id = typeof m === "string" ? m : m._id || m.id || m.userId || null;
+    if (id) memberIdsSet.add(String(id));
+  });
+
+  // Loại bỏ user đã là thành viên và chính mình
+  const candidates = (list || []).filter((u) => {
+    const uid = String(u._id || u.id || u.userId || "");
+    if (!uid) return false;
+    if (memberIdsSet.has(uid)) return false; // đã có trong nhóm -> loại
+    if (String(uid) === String(ME_ID)) return false; // không hiện chính bạn
+    return true;
+  });
+
+  if (!candidates.length) {
+    addMemberUserList.innerHTML = `<div style='padding:10px'>Không có người dùng nào phù hợp để thêm (mọi người đã là thành viên).</div>`;
+    return;
+  }
+
+  addMemberUserList.innerHTML = candidates
+    .map(u => {
+      const uid = u._id || u.id || u.userId || "";
+      return `
+        <label class="user-item" style="display:flex;align-items:center;gap:8px;padding:6px;">
+          <input type="checkbox" value="${uid}">
+          <div class="avatar small">${getInitial(u.name || u.username || "U")}</div>
+          <div style="flex:1;">
+            <div class="name">${u.name || u.username || "Không tên"}</div>
+            <div class="detail">${u.email || ""}</div>
+          </div>
+        </label>
+      `;
+    })
+    .join("");
+} catch (e) {
+  addMemberUserList.innerHTML = `<div style='padding:10px;color:red'>Lỗi tải danh sách người dùng.</div>`;
+}
+
+}
+
+function closeAddMemberModal() {
+  if (addMemberModal) addMemberModal.classList.add("hidden");
+}
+
+cancelAddMemberBtn?.addEventListener("click", closeAddMemberModal);
+addMemberModal?.addEventListener("click", (e) => {
+  if (e.target === addMemberModal) closeAddMemberModal();
+});
+
+confirmAddMemberBtn?.addEventListener("click", async () => {
+  const selected = [...addMemberUserList.querySelectorAll("input:checked")].map(i => i.value);
+  if (!selected.length) return toast("Chọn ít nhất 1 người");
+
+  try {
+    await API.post(`/api/conversations/${currentConv}/members`, { userIds: selected });
+    toast("Đã thêm thành viên!");
+    closeAddMemberModal();
+  } catch (e) {
+    toast(e?.message || "Thêm thành viên thất bại");
+  }
+});
+
+
+ // === Remove member modal elements (ensure these IDs match HTML) ===
+const removeMemberModal = document.getElementById("removeMemberModal");
+const removeMemberUserList = document.getElementById("removeMemberUserList");
+const cancelRemoveMemberBtn = document.getElementById("cancelRemoveMemberBtn");
+const confirmRemoveMemberBtn = document.getElementById("confirmRemoveMemberBtn");
+
+function closeRemoveMemberModal() {
+  if (removeMemberModal) removeMemberModal.classList.add("hidden");
+  if (removeMemberUserList) removeMemberUserList.innerHTML = "";
+}
+
+// Close handlers
+cancelRemoveMemberBtn?.addEventListener("click", closeRemoveMemberModal);
+removeMemberModal?.addEventListener("click", (e) => {
+  if (e.target === removeMemberModal) closeRemoveMemberModal();
+});
+
+// ===== New removeMemberFlow using modal (shows current members to pick) =====
+async function removeMemberFlow() {
+  // Fallback to old prompt if no modal present
+  if (!removeMemberModal || !removeMemberUserList) {
+    // Existing prompt fallback
     const uid = (prompt("Nhập userId cần xoá khỏi nhóm:") || "").trim();
     if (!uid) return;
     try {
       await API.delete(`/api/conversations/${currentConv}/members/${uid}`);
       toast("Đã xoá thành viên");
+      await loadConversations();
     } catch (e) {
       toast(e?.message || "Xoá thành viên thất bại");
     }
+    return;
   }
+
+  if (!currentConv) {
+    toast("Chọn cuộc trò chuyện trước đã");
+    return;
+  }
+
+  // Show modal and load members
+  removeMemberModal.classList.remove("hidden");
+  removeMemberUserList.innerHTML = `<div style='padding:10px'>Đang tải danh sách thành viên...</div>`;
+
+  try {
+    // Lấy chi tiết conv để biết members
+    const conv = await API.get(`/api/conversations/${currentConv}`);
+    const members = conv?.members || conv?.participants || [];
+
+    if (!members || !members.length) {
+      removeMemberUserList.innerHTML = `<div style='padding:10px'>Không có thành viên để hiển thị.</div>`;
+      return;
+    }
+
+    // Chuẩn hoá danh sách thành viên -> array of { id, name, isOwner }
+    const normalized = await Promise.all(
+      members.map(async (m) => {
+        // m có thể là string id, object { _id, name }, hoặc user-like
+        let id = typeof m === "string" ? m : m?._id || m?.id || m?.userId || null;
+        let name = "";
+        let isOwner = false;
+        // Nếu item là object có thông tin
+        if (typeof m === "object" && (m.name || m.username || m.displayName)) {
+          name = m.name || m.username || m.displayName || String(id);
+        } else {
+          // cố fetch user nếu cần
+          try {
+            const u = await fetchUserById(id);
+            name = getDisplayNameFromUser(u) || String(id);
+          } catch {
+            name = String(id);
+          }
+        }
+        // owner detection (if conv.owner exists)
+        if (conv?.owner) {
+          isOwner = String(conv.owner) === String(id);
+        }
+        // do not show current user as removable (unless you want to allow)
+        const isMe = String(id) === String(ME_ID);
+        return { id: String(id), name, isOwner: !!isOwner, isMe: !!isMe };
+      })
+    );
+
+    // Build candidate list: show members that can be removed:
+    // - Exclude owner (can't remove owner) and exclude yourself (ME_ID)
+    const candidates = normalized.filter((it) => !it.isOwner && !it.isMe);
+
+    if (!candidates.length) {
+      removeMemberUserList.innerHTML = `<div style='padding:10px'>Không có thành viên nào có thể xoá (owner và bạn không hiển thị).</div>`;
+      return;
+    }
+
+    removeMemberUserList.innerHTML = candidates
+      .map(
+        (u) => `
+      <label class="user-item" style="display:flex;align-items:center;gap:8px;padding:6px;">
+        <input type="checkbox" value="${u.id}">
+        <div class="avatar small">${getInitial(u.name || u.id)}</div>
+        <div style="flex:1;">
+          <div class="name">${u.name || u.id}</div>
+          <div class="detail">${u.id}</div>
+        </div>
+      </label>
+    `
+      )
+      .join("");
+  } catch (err) {
+    console.error("load members for remove error:", err);
+    removeMemberUserList.innerHTML = `<div style='padding:10px;color:red'>Lỗi tải danh sách thành viên.</div>`;
+  }
+}
+
+// Khi bấm Xoá (confirm)
+confirmRemoveMemberBtn?.addEventListener("click", async () => {
+  const selected = [...(removeMemberUserList?.querySelectorAll("input:checked") || [])].map(
+    (i) => i.value
+  );
+  if (!selected.length) {
+    return toast("Chọn ít nhất 1 thành viên để xoá.");
+  }
+
+  if (!confirm(`Bạn chắc chắn muốn xoá ${selected.length} thành viên khỏi nhóm?`)) return;
+
+  try {
+    // Nếu backend chỉ hỗ trợ xoá từng người, gọi lần lượt
+    await Promise.all(
+      selected.map((uid) =>
+        API.delete(`/api/conversations/${currentConv}/members/${uid}`).catch((e) => {
+          // trả lỗi từng người nhưng vẫn tiếp tục
+          console.warn(`Failed removing ${uid}:`, e);
+          throw e;
+        })
+      )
+    );
+
+    toast("Đã xoá thành viên");
+    closeRemoveMemberModal();
+    // cập nhật sidebar / conv detail
+    await loadConversations();
+    // nếu đang mở conversation, reload chi tiết
+    if (currentConv) await openConversation(currentConv, null);
+  } catch (e) {
+    console.error("remove members error:", e);
+    toast(e?.message || "Xoá thành viên thất bại");
+  }
+});
+
 
   async function leaveGroupFlow() {
     if (!currentConv) return;
@@ -1284,7 +1600,8 @@ async function recallMessage(messageId, rowEl) {
     },
     false
   );
-  // ===== Modal Cài đặt Nhóm =====
+
+  // ===== Modal Cài đặt Nhóm + Cài đặt Chat Cá nhân =====
   const groupSettingsBtn = document.getElementById("groupSettingsBtn");
   const groupSettingsModal = document.getElementById("groupSettingsModal");
   const searchFriendBtn = document.getElementById("searchFriendBtn");
@@ -1310,12 +1627,115 @@ async function recallMessage(messageId, rowEl) {
     "closeGroupSettingsBtn"
   );
 
-  function openGroupSettings() {
-    if (!currentConvIsGroup) {
-      toast("Chỉ áp dụng cho nhóm");
+  // Elements for direct chat settings (must exist in your index.ejs)
+  const directSettingsModal = document.getElementById("directSettingsModal");
+  const unfriendBtn = document.getElementById("unfriendBtn");
+  const blockBtn = document.getElementById("blockBtn");
+  const closeDirectSettingsBtn = document.getElementById("closeDirectSettingsBtn");
+
+  function openDirectSettings() {
+    if (!currentConv || currentConvIsGroup) return;
+    if (!directSettingsModal) return toast("Không có modal cài đặt bạn bè");
+    directSettingsModal.classList.remove("hidden");
+  }
+
+  function closeDirectSettings() {
+    if (!directSettingsModal) return;
+    directSettingsModal.classList.add("hidden");
+  }
+
+  unfriendBtn?.addEventListener("click", async () => {
+    closeDirectSettings();
+    if (!currentPeer?._id) return toast("Không xác định được người dùng");
+    if (confirm(`Huỷ kết bạn với ${currentPeer.name}?`)) {
+      await cancelFriendship(currentPeer._id);
+    }
+  });
+  blockBtn?.addEventListener("click", async () => {
+    closeDirectSettings();
+    if (!currentPeer?._id) return toast("Không xác định được người dùng");
+    if (confirm(`Chặn ${currentPeer.name}?`)) {
+      await blockUser(currentPeer._id);
+    }
+  });
+  closeDirectSettingsBtn?.addEventListener("click", closeDirectSettings);
+
+  // Mở modal cài đặt: nếu là nhóm -> mở modal nhóm; nếu là chat cá nhân -> mở direct modal
+  async function openGroupSettings() {
+    if (!currentConv) {
+      toast("Chọn cuộc trò chuyện trước đã");
       return;
     }
-    groupSettingsModal.classList.remove("hidden");
+
+    if (currentConvIsGroup) {
+      if (!groupSettingsModal) return toast("Không có modal cài đặt nhóm");
+      groupSettingsModal.classList.remove("hidden");
+      return;
+    } else {
+      openDirectSettings();
+      return;
+    }
+  }
+
+  // Gọi API huỷ kết bạn (nhiều backend dùng endpoint khác nhau)
+async function cancelFriendship(userId) {
+  try {
+    const res = await fetch("/api/friends/unfriend", {
+      method: "DELETE",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(localStorage.getItem("TOKEN") ? { Authorization: "Bearer " + localStorage.getItem("TOKEN") } : {}),
+      },
+      body: JSON.stringify({ friendId: userId }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.message || `HTTP ${res.status}`);
+    }
+    toast("Đã huỷ kết bạn");
+    await loadConversations();
+    await loadFriendsAndCache();
+  } catch (e) {
+    toast(e?.message || "Huỷ kết bạn thất bại");
+  }
+}
+
+
+  // Gọi API chặn user (nhiều backend có endpoint khác nhau)
+  async function blockUser(userId) {
+    try {
+      const tries = [
+        () => API.post("/api/friends/block", { to: userId }),
+        () => API.post("/api/users/block", { userId }),
+        () => API.post("/api/block", { target: userId }),
+      ];
+      let ok = false, lastErr = null;
+      for (const fn of tries) {
+        try {
+          await fn();
+          ok = true;
+          break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (ok) {
+        toast("Đã chặn người dùng");
+        if (currentConv) {
+          currentConv = null;
+          if (messagesEl) messagesEl.innerHTML = "";
+          peerNameEl.textContent = "Chọn một cuộc trò chuyện";
+          peerAvatarEl.textContent = "🙂";
+          peerStatusEl.textContent = "—";
+        }
+        await loadConversations();
+      } else {
+        throw lastErr || new Error("Không thể chặn người dùng");
+      }
+    } catch (e) {
+      toast(e?.message || "Chặn thất bại");
+    }
   }
 
   function closeGroupSettings() {
@@ -1342,8 +1762,8 @@ async function recallMessage(messageId, rowEl) {
     closeGroupSettings();
     await leaveGroupFlow();
   });
-  // ====== TÌM KIẾM BẠN BÈ & KẾT BẠN ======
 
+  // ====== TÌM KIẾM BẠN BÈ & KẾT BẠN ======
   function openFriendSearchModal() {
     if (!friendSearchModal) return;
     friendSearchModal.classList.remove("hidden");
@@ -1384,8 +1804,8 @@ async function recallMessage(messageId, rowEl) {
           const infoText = isFriend ? `(Bạn bè)` : u.username || u.email || "";
 
           const actionButton = isFriend
-            ? `<button class="btn primary small start-chat-btn" data-id="${userId}">Nhắn tin</button>` // <== NÚT NHẮN TIN
-            : `<button class="btn outline small send-friend-req" data-id="${userId}">Kết bạn</button>`; // <== NÚT KẾT BẠN
+            ? `<button class="btn primary small start-chat-btn" data-id="${userId}">Nhắn tin</button>`
+            : `<button class="btn outline small send-friend-req" data-id="${userId}">Kết bạn</button>`;
 
           return `
           <div class="user-item-result" data-id="${userId}">
@@ -1421,25 +1841,21 @@ async function recallMessage(messageId, rowEl) {
       toast(e?.message || "Không thể gửi yêu cầu kết bạn");
     }
   }
-  // public/js/chat.js (Tìm và thay thế hàm startChatWithFriend)
 
   async function startChatWithFriend(friendId) {
     if (!friendId || !ME_ID) return;
     try {
-      // GỌI ĐÚNG API BACKEND: /api/conversations/private
-      // Payload: { otherUserId: [ID của người bạn] }
       const conv = await API.post("/api/conversations/private", {
-        otherUserId: friendId, // <-- Payload đúng theo controller
-      }); // Backend trả về đối tượng Conversation
+        otherUserId: friendId,
+      });
 
       const convId =
         conv?._id || conv?.id || conv?.conversationId || conv?.data?._id;
 
       if (convId) {
         toast("Mở trò chuyện thành công!");
-        closeFriendSearchModal(); // Đóng modal tìm kiếm
-        await loadConversations(); // Tải lại danh sách để đảm bảo conv mới hiển thị
-        // Mở hội thoại bằng ID nhận được và đối tượng conv
+        closeFriendSearchModal();
+        await loadConversations();
         openConversation(convId, conv);
       } else {
         throw new Error("Phản hồi từ Server không có ID hội thoại hợp lệ.");
@@ -1449,6 +1865,7 @@ async function recallMessage(messageId, rowEl) {
       console.error("Lỗi mở chat:", e);
     }
   }
+
   // BINDING cho Tìm kiếm Bạn bè
   searchFriendBtn?.addEventListener("click", openFriendSearchModal);
   closeFriendSearchBtn?.addEventListener("click", closeFriendSearchModal);
@@ -1466,8 +1883,8 @@ async function recallMessage(messageId, rowEl) {
 
   // Delegate event listener cho nút Kết bạn
   friendSearchResultList?.addEventListener("click", (e) => {
-    const chatBtn = e.target.closest(".start-chat-btn"); // <== NEW: Nút Nhắn tin
-    const sendReqBtn = e.target.closest(".send-friend-req"); // Nút Kết bạn
+    const chatBtn = e.target.closest(".start-chat-btn");
+    const sendReqBtn = e.target.closest(".send-friend-req");
 
     if (chatBtn) {
       const userId = chatBtn.dataset.id;
@@ -1481,8 +1898,8 @@ async function recallMessage(messageId, rowEl) {
       return;
     }
   });
-  // ====== YÊU CẦU KẾT BẠN ĐẾN ======
 
+  // ====== YÊU CẦU KẾT BẠN ĐẾN ======
   function openFriendRequestsModal() {
     if (!friendRequestsModal) return;
     friendRequestsModal.classList.remove("hidden");
@@ -1500,9 +1917,8 @@ async function recallMessage(messageId, rowEl) {
     requestCountEl.textContent = "0";
 
     try {
-      // API: GET /api/friends/requests
-      const res = await API.get("/api/friends/requests"); // <= Sửa từ 'requests' thành 'res' // Lấy danh sách yêu cầu đến
-      const requests = res?.incoming || []; // <= Lấy mảng 'incoming'
+      const res = await API.get("/api/friends/requests");
+      const requests = res?.incoming || [];
       if (!requests || !requests.length) {
         friendRequestList.innerHTML = `<div style='padding:10px'>Không có yêu cầu kết bạn nào đang chờ.</div>`;
         return;
@@ -1510,20 +1926,16 @@ async function recallMessage(messageId, rowEl) {
 
       requestCountEl.textContent = requests.length;
 
-      // Hiển thị danh sách yêu cầu
       friendRequestList.innerHTML = requests
         .map((req) => {
           const sender = req.from;
           const name = sender.name || sender.username || "Không tên";
           const detail = sender.username || sender.email || "";
 
-          // Lấy ID người gửi (cần thiết cho backend)
           const fromId = sender._id || sender.id;
 
           return `
-            <div class="user-item-result request-item" data-request-id="${
-              req._id
-            }">
+            <div class="user-item-result request-item" data-request-id="${req._id}">
                 <div class="avatar small">${getInitial(name)}</div>
                 <div class="info">
                     <div class="name">${name}</div>
@@ -1550,7 +1962,6 @@ async function recallMessage(messageId, rowEl) {
     if (!fromId || !["accept", "reject"].includes(action)) return;
 
     try {
-      // SỬA payload: gửi 'from' (ID người gửi) thay vì 'requestId'
       await API.post("/api/friends/respond", { from: fromId, action });
 
       toast(`Đã ${action === "accept" ? "chấp nhận" : "từ chối"} yêu cầu!`);
@@ -1575,14 +1986,13 @@ async function recallMessage(messageId, rowEl) {
     if (e.target === friendRequestsModal) closeFriendRequestsModal();
   });
 
-  // Delegate event listener cho nút Đồng ý / Từ chối
   friendRequestList?.addEventListener("click", (e) => {
     const acceptBtn = e.target.closest(".respond-req-accept");
     const rejectBtn = e.target.closest(".respond-req-reject");
 
     if (acceptBtn || rejectBtn) {
       const btn = acceptBtn || rejectBtn;
-      const fromId = btn.dataset.fromId; 
+      const fromId = btn.dataset.fromId;
       const action = acceptBtn ? "accept" : "reject";
 
       const requestItemEl = btn.closest(".request-item");
@@ -1590,9 +2000,4 @@ async function recallMessage(messageId, rowEl) {
     }
   });
 
-  // Tải yêu cầu kết bạn ngay khi load app (hoặc sau khi login)
-  // Đặt lệnh gọi này vào cuối hàm (function () { ... })();
-  // ...
-  // loadConversations();
-  // loadFriendRequests(); // Thêm lệnh này để hiển thị badge count ngay khi vào chat
 })();

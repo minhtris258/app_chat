@@ -110,77 +110,156 @@ export const getConversation = async (req, res) => {
 /** PATCH /api/conversations/:id/name
  */
 export const renameGroup = async (req, res) => {
-  const me = req.user._id;
-  const { id } = req.params;
-  const { name } = req.body || {};
+  try {
+    const me = req.user._id;
+    const { id } = req.params;
+    const { name } = req.body || {};
 
-  const conv = await Conversation.findById(id);
-  if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group")
-    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
-  if (toStr(conv.owner) !== toStr(me))
-    return res.status(403).json({ error: "Chỉ owner được đổi tên nhóm" });
+    const conv = await Conversation.findById(id);
+    if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
+    if (conv.type !== "group")
+      return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
-  await Conversation.updateOne(
-    { _id: id },
-    { $set: { name: name?.trim() || "" } }
-  );
-  res.json({ ok: true });
+    // Chỉ member mới được đổi tên
+    const isMember = conv.members.some((m) => toStr(m) === toStr(me));
+    if (!isMember) return res.status(403).json({ error: "Không có quyền" });
+
+    await Conversation.updateOne(
+      { _id: id },
+      { $set: { name: name?.trim() || "" } }
+    );
+
+    // Notify members (nếu có sendToUser)
+    if (req.sendToUser) {
+      const updated = await Conversation.findById(id).select("_id name members");
+      (updated.members || []).forEach((m) => {
+        try {
+          req.sendToUser(m, "conversation:renamed", { conversationId: id, name: updated.name });
+        } catch (_) {}
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("renameGroup error:", err);
+    return res.status(500).json({ error: err.message || "Lỗi server" });
+  }
 };
 
 /** POST /api/conversations/:id/members
  */
 export const addMembers = async (req, res) => {
-  const me = req.user._id;
-  const { id } = req.params;
-  const { userIds = [] } = req.body || {};
+  try {
+    const me = req.user._id;
+    const { id } = req.params;
+    const { userIds = [] } = req.body || {};
 
-  const conv = await Conversation.findById(id);
-  if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group")
-    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
+    const conv = await Conversation.findById(id);
+    if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
+    if (conv.type !== "group")
+      return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
-  if (toStr(conv.owner) !== toStr(me)) {
-    return res.status(403).json({ error: "Chỉ owner được thêm thành viên" });
+    // Chỉ members mới được thêm (owner hoặc member đều ok)
+    const isMember = conv.members.some((m) => toStr(m) === toStr(me));
+    if (!isMember) return res.status(403).json({ error: "Không có quyền" });
+
+    // Chuẩn hoá và lọc những id chưa có trong conv
+    const existingSet = new Set((conv.members || []).map(toStr));
+    const uniqueToAdd = Array.from(new Set(userIds.map(toStr)))
+      .filter((uid) => !existingSet.has(uid))
+      .map((uid) => new mongoose.Types.ObjectId(uid));
+
+    if (uniqueToAdd.length === 0) return res.json({ ok: true, added: 0 });
+
+    await Conversation.updateOne(
+      { _id: id },
+      { $addToSet: { members: { $each: uniqueToAdd } } }
+    );
+
+    // Notify newly added users + notify existing members about update
+    if (req.sendToUser) {
+      const updated = await Conversation.findById(id).select("_id name members");
+      // notify added users they were added
+      uniqueToAdd.forEach((uidObj) => {
+        try {
+          req.sendToUser(String(uidObj), "conversation:addedToGroup", {
+            conversationId: id,
+            conv: updated,
+          });
+        } catch (_) {}
+      });
+      // notify all members that members list changed
+      (updated.members || []).forEach((m) => {
+        try {
+          req.sendToUser(m, "conversation:membersUpdated", {
+            conversationId: id,
+            members: updated.members,
+          });
+        } catch (_) {}
+      });
+    }
+
+    return res.json({ ok: true, added: uniqueToAdd.length });
+  } catch (err) {
+    console.error("addMembers error:", err);
+    return res.status(500).json({ error: err.message || "Lỗi server" });
   }
-
-  const uniqueToAdd = userIds
-    .map(toStr)
-    .filter((uid) => !conv.members.map(toStr).includes(uid))
-    .map((uid) => new mongoose.Types.ObjectId(uid));
-
-  if (uniqueToAdd.length === 0) return res.json({ ok: true, added: 0 });
-
-  await Conversation.updateOne(
-    { _id: id },
-    { $addToSet: { members: { $each: uniqueToAdd } } }
-  );
-
-  res.json({ ok: true, added: uniqueToAdd.length });
 };
 
 /** DELETE /api/conversations/:id/members/:userId
  */
 export const removeMember = async (req, res) => {
-  const me = req.user._id;
-  const { id, userId } = req.params;
+  try {
+    const me = req.user._id;
+    const { id, userId } = req.params;
 
-  const conv = await Conversation.findById(id);
-  if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
-  if (conv.type !== "group")
-    return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
+    const conv = await Conversation.findById(id);
+    if (!conv) return res.status(404).json({ error: "Không tìm thấy" });
+    if (conv.type !== "group")
+      return res.status(400).json({ error: "Chỉ áp dụng cho nhóm" });
 
-  if (toStr(conv.owner) !== toStr(me)) {
-    return res.status(403).json({ error: "Chỉ owner được gỡ thành viên" });
+    // Only members can remove members
+    const isMember = conv.members.some((m) => toStr(m) === toStr(me));
+    if (!isMember) return res.status(403).json({ error: "Không có quyền" });
+
+    // Owner cannot be removed by anyone (including owner via this endpoint)
+    if (toStr(userId) === toStr(conv.owner)) {
+      return res.status(400).json({ error: "Không thể gỡ owner" });
+    }
+
+    // If target is not in members -> 404/ok
+    const targetIsMember = conv.members.some((m) => toStr(m) === toStr(userId));
+    if (!targetIsMember) return res.status(404).json({ error: "Người dùng không phải thành viên" });
+
+    // Proceed to pull the user
+    await Conversation.updateOne({ _id: id }, { $pull: { members: userId } });
+
+    // Notify remaining members and removed user
+    if (req.sendToUser) {
+      const updated = await Conversation.findById(id).select("_id name members");
+      // notify removed user
+      try {
+        req.sendToUser(userId, "conversation:removedFromGroup", {
+          conversationId: id,
+          conv: updated,
+        });
+      } catch (_) {}
+      // notify remaining members
+      (updated.members || []).forEach((m) => {
+        try {
+          req.sendToUser(m, "conversation:membersUpdated", {
+            conversationId: id,
+            members: updated.members,
+          });
+        } catch (_) {}
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("removeMember error:", err);
+    return res.status(500).json({ error: err.message || "Lỗi server" });
   }
-
-  // Owner không thể tự gỡ chính mình bằng API này
-  if (toStr(userId) === toStr(conv.owner)) {
-    return res.status(400).json({ error: "Không thể gỡ owner" });
-  }
-
-  await Conversation.updateOne({ _id: id }, { $pull: { members: userId } });
-  res.json({ ok: true });
 };
 
 /** POST /api/conversations/:id/leave
